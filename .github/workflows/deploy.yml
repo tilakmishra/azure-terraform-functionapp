@@ -1,9 +1,10 @@
 name: Deploy Infrastructure and Application
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:  # Allow manual trigger
+  # Disabled auto-trigger - use manual trigger only
+  # push:
+  #   branches: [main]
+  workflow_dispatch:  # Manual trigger only
 
 env:
   AZURE_FUNCTIONAPP_PACKAGE_PATH: 'app/backend'
@@ -37,20 +38,16 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Terraform Init
-        working-directory: ./terraform
         run: terraform init
 
       - name: Terraform Plan
-        working-directory: ./terraform
         run: terraform plan -var-file="dev.tfvars" -out=tfplan
 
       - name: Terraform Apply
-        working-directory: ./terraform
         run: terraform apply -auto-approve tfplan
 
       - name: Get Terraform Outputs
         id: terraform-output
-        working-directory: ./terraform
         run: |
           echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
           echo "static_web_app_name=$(terraform output -raw static_web_app_name)" >> $GITHUB_OUTPUT
