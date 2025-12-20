@@ -53,33 +53,65 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # Temporarily enable public access for deployment
-      - name: Enable public access for deployment
+      - name: Get Function App Storage Account
+        id: get-storage
         run: |
-          az functionapp update \
+          # Get the storage account used by the Function App
+          STORAGE_NAME=$(az functionapp config appsettings list \
             --name ${{ inputs.function_app_name }} \
             --resource-group ${{ inputs.resource_group }} \
-            --set publicNetworkAccess=Enabled
-          echo "Waiting for setting to propagate..."
+            --query "[?name=='AzureWebJobsStorage'].value" -o tsv | sed 's/.*AccountName=\([^;]*\).*/\1/')
+          echo "storage_name=$STORAGE_NAME" >> $GITHUB_OUTPUT
+          echo "Found storage account: $STORAGE_NAME"
+
+      - name: Upload package to Storage and deploy
+        run: |
+          # Get storage connection string
+          STORAGE_CONN=$(az storage account show-connection-string \
+            --name ${{ steps.get-storage.outputs.storage_name }} \
+            --resource-group ${{ inputs.resource_group }} \
+            --query connectionString -o tsv)
+          
+          # Create deployments container if not exists
+          az storage container create \
+            --name deployments \
+            --connection-string "$STORAGE_CONN" \
+            --public-access off 2>/dev/null || true
+          
+          # Upload zip to blob storage
+          BLOB_NAME="backend-$(date +%Y%m%d%H%M%S).zip"
+          az storage blob upload \
+            --container-name deployments \
+            --file app/backend-deploy.zip \
+            --name "$BLOB_NAME" \
+            --connection-string "$STORAGE_CONN" \
+            --overwrite
+          
+          # Generate SAS URL (valid for 1 hour)
+          EXPIRY=$(date -u -d "1 hour" '+%Y-%m-%dT%H:%MZ')
+          SAS_URL=$(az storage blob generate-sas \
+            --container-name deployments \
+            --name "$BLOB_NAME" \
+            --permissions r \
+            --expiry "$EXPIRY" \
+            --connection-string "$STORAGE_CONN" \
+            --full-uri -o tsv)
+          
+          # Deploy using WEBSITE_RUN_FROM_PACKAGE
+          az functionapp config appsettings set \
+            --name ${{ inputs.function_app_name }} \
+            --resource-group ${{ inputs.resource_group }} \
+            --settings "WEBSITE_RUN_FROM_PACKAGE=$SAS_URL"
+          
+          echo "✅ Package deployed via Storage Account"
+
+      - name: Restart Function App
+        run: |
+          az functionapp restart \
+            --name ${{ inputs.function_app_name }} \
+            --resource-group ${{ inputs.resource_group }}
+          echo "Waiting for Function App to restart..."
           sleep 30
-
-      - name: Deploy using Azure CLI
-        run: |
-          az functionapp deployment source config-zip \
-            --name ${{ inputs.function_app_name }} \
-            --resource-group ${{ inputs.resource_group }} \
-            --src app/backend-deploy.zip \
-            --build-remote true
-
-      # Disable public access after deployment
-      - name: Disable public access after deployment
-        if: always()
-        run: |
-          az functionapp update \
-            --name ${{ inputs.function_app_name }} \
-            --resource-group ${{ inputs.resource_group }} \
-            --set publicNetworkAccess=Disabled
-          echo "✅ Public access disabled - Function App is now private"
 
       - name: Verify deployment
         run: |
