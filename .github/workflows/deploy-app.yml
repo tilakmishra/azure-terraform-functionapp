@@ -1,0 +1,218 @@
+name: Deploy Application Only
+
+# Use this workflow when infrastructure already exists
+# For full infrastructure + app deployment, use deploy.yml
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      function_app_name:
+        description: 'Function App name (e.g., func-emp-dev-gr0j)'
+        required: true
+        type: string
+      static_web_app_name:
+        description: 'Static Web App name (e.g., swa-emp-dev-gr0j)'
+        required: true
+        type: string
+      resource_group:
+        description: 'Resource Group name (e.g., rg-emp-dev)'
+        required: true
+        type: string
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  # ============================================
+  # Job 1: Deploy Function App (Backend)
+  # ============================================
+  deploy-backend:
+    name: 'Deploy Function App (Python)'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        working-directory: app/backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt --target=".python_packages/lib/site-packages"
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Function App Publish Profile
+        id: get-publish-profile
+        run: |
+          PUBLISH_PROFILE=$(az webapp deployment list-publishing-profiles \
+            --name ${{ inputs.function_app_name }} \
+            --resource-group ${{ inputs.resource_group }} \
+            --xml)
+          echo "::add-mask::$PUBLISH_PROFILE"
+          echo "publish_profile<<EOF" >> $GITHUB_OUTPUT
+          echo "$PUBLISH_PROFILE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Azure Function App
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ inputs.function_app_name }}
+          package: app/backend
+          publish-profile: ${{ steps.get-publish-profile.outputs.publish_profile }}
+          scm-do-build-during-deployment: true
+          enable-oryx-build: true
+
+      - name: Verify deployment
+        run: |
+          echo "✅ Backend deployed to: https://${{ inputs.function_app_name }}.azurewebsites.net"
+
+  # ============================================
+  # Job 2: Deploy Static Web App (Frontend)
+  # ============================================
+  deploy-frontend:
+    name: 'Deploy Static Web App (React)'
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app/frontend
+        run: npm ci || npm install
+
+      - name: Build frontend
+        working-directory: app/frontend
+        env:
+          REACT_APP_API_URL: https://${{ inputs.function_app_name }}.azurewebsites.net/api
+        run: npm run build
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get Static Web App deployment token
+        id: get-swa-token
+        run: |
+          TOKEN=$(az staticwebapp secrets list \
+            --name ${{ inputs.static_web_app_name }} \
+            --resource-group ${{ inputs.resource_group }} \
+            --query "properties.apiKey" -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Static Web App
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.get-swa-token.outputs.token }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "app/frontend/build"
+          skip_app_build: true
+
+      - name: Get Static Web App URL
+        run: |
+          SWA_URL=$(az staticwebapp show \
+            --name ${{ inputs.static_web_app_name }} \
+            --resource-group ${{ inputs.resource_group }} \
+            --query "defaultHostname" -o tsv)
+          echo "✅ Frontend deployed to: https://$SWA_URL"
+
+  # ============================================
+  # Job 3: Seed Sample Data
+  # ============================================
+  seed-data:
+    name: 'Seed Sample Data'
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Wait for Function App to be ready
+        run: sleep 60
+
+      - name: Seed employee data
+        run: |
+          API_URL="https://${{ inputs.function_app_name }}.azurewebsites.net/api"
+          
+          echo "Seeding sample employees..."
+          
+          # Create sample employees
+          curl -sf -X POST "$API_URL/employees" \
+            -H "Content-Type: application/json" \
+            -d '{"firstName":"John","lastName":"Doe","email":"john.doe@example.com","department":"Engineering","position":"Senior Developer"}' || echo "John may already exist"
+          
+          curl -sf -X POST "$API_URL/employees" \
+            -H "Content-Type: application/json" \
+            -d '{"firstName":"Jane","lastName":"Smith","email":"jane.smith@example.com","department":"HR","position":"HR Manager"}' || echo "Jane may already exist"
+          
+          curl -sf -X POST "$API_URL/employees" \
+            -H "Content-Type: application/json" \
+            -d '{"firstName":"Bob","lastName":"Johnson","email":"bob.johnson@example.com","department":"Engineering","position":"DevOps Engineer"}' || echo "Bob may already exist"
+          
+          curl -sf -X POST "$API_URL/employees" \
+            -H "Content-Type: application/json" \
+            -d '{"firstName":"Alice","lastName":"Williams","email":"alice.williams@example.com","department":"Finance","position":"Financial Analyst"}' || echo "Alice may already exist"
+          
+          curl -sf -X POST "$API_URL/employees" \
+            -H "Content-Type: application/json" \
+            -d '{"firstName":"Charlie","lastName":"Brown","email":"charlie.brown@example.com","department":"Sales","position":"Sales Manager"}' || echo "Charlie may already exist"
+          
+          echo ""
+          echo "✅ Sample data seeded!"
+          echo ""
+          echo "Test the API:"
+          echo "  curl $API_URL/employees"
+
+  # ============================================
+  # Job 4: Summary
+  # ============================================
+  summary:
+    name: 'Deployment Summary'
+    needs: [deploy-backend, deploy-frontend, seed-data]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Print Summary
+        run: |
+          SWA_URL=$(az staticwebapp show \
+            --name ${{ inputs.static_web_app_name }} \
+            --resource-group ${{ inputs.resource_group }} \
+            --query "defaultHostname" -o tsv)
+          
+          echo "============================================"
+          echo "🎉 DEPLOYMENT COMPLETE!"
+          echo "============================================"
+          echo ""
+          echo "📱 Frontend URL: https://$SWA_URL"
+          echo "🔌 API URL:      https://${{ inputs.function_app_name }}.azurewebsites.net/api"
+          echo ""
+          echo "Test endpoints:"
+          echo "  GET  /api/health     - Health check"
+          echo "  GET  /api/employees  - List all employees"
+          echo "  POST /api/employees  - Create employee"
+          echo "============================================"

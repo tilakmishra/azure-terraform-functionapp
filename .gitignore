@@ -1,0 +1,44 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+
+# Local settings
+local.settings.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python_packages/
+.venv/
+venv/
+
+# Node
+node_modules/
+build/
+dist/
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Azure
+.azure/
