@@ -40,37 +40,46 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
+      - name: Install dependencies and create deployment package
         working-directory: app/backend
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt --target=".python_packages/lib/site-packages"
+          # Create deployment zip
+          zip -r ../backend-deploy.zip . -x "*.pyc" -x "__pycache__/*" -x ".venv/*"
 
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Get Function App Publish Profile
-        id: get-publish-profile
+      # Temporarily enable public access for deployment
+      - name: Enable public access for deployment
         run: |
-          PUBLISH_PROFILE=$(az webapp deployment list-publishing-profiles \
+          az functionapp update \
             --name ${{ inputs.function_app_name }} \
             --resource-group ${{ inputs.resource_group }} \
-            --xml)
-          echo "::add-mask::$PUBLISH_PROFILE"
-          echo "publish_profile<<EOF" >> $GITHUB_OUTPUT
-          echo "$PUBLISH_PROFILE" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+            --set publicNetworkAccess=Enabled
+          echo "Waiting for setting to propagate..."
+          sleep 30
 
-      - name: Deploy to Azure Function App
-        uses: Azure/functions-action@v1
-        with:
-          app-name: ${{ inputs.function_app_name }}
-          package: app/backend
-          publish-profile: ${{ steps.get-publish-profile.outputs.publish_profile }}
-          scm-do-build-during-deployment: true
-          enable-oryx-build: true
+      - name: Deploy using Azure CLI
+        run: |
+          az functionapp deployment source config-zip \
+            --name ${{ inputs.function_app_name }} \
+            --resource-group ${{ inputs.resource_group }} \
+            --src app/backend-deploy.zip \
+            --build-remote true
+
+      # Disable public access after deployment
+      - name: Disable public access after deployment
+        if: always()
+        run: |
+          az functionapp update \
+            --name ${{ inputs.function_app_name }} \
+            --resource-group ${{ inputs.resource_group }} \
+            --set publicNetworkAccess=Disabled
+          echo "✅ Public access disabled - Function App is now private"
 
       - name: Verify deployment
         run: |
