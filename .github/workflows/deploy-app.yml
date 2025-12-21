@@ -87,8 +87,8 @@ jobs:
             --connection-string "$STORAGE_CONN" \
             --overwrite
           
-          # Generate SAS URL (valid for 1 hour)
-          EXPIRY=$(date -u -d "1 hour" '+%Y-%m-%dT%H:%MZ')
+          # Generate SAS URL (valid for 1 year)
+          EXPIRY=$(date -u -d "1 year" '+%Y-%m-%dT%H:%MZ')
           SAS_URL=$(az storage blob generate-sas \
             --container-name deployments \
             --name "$BLOB_NAME" \
