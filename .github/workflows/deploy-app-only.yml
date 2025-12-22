@@ -1,0 +1,213 @@
+name: Deploy Application Code Only
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+env:
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'app/backend'
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  # ============================================
+  # Get existing resource details
+  # ============================================
+  get-resources:
+    name: 'Get Existing Resources'
+    runs-on: ubuntu-latest
+    outputs:
+      function_app_name: ${{ steps.get-names.outputs.function_app_name }}
+      function_app_url: ${{ steps.get-names.outputs.function_app_url }}
+      static_web_app_name: ${{ steps.get-names.outputs.static_web_app_name }}
+      static_web_app_url: ${{ steps.get-names.outputs.static_web_app_url }}
+      resource_group: ${{ steps.get-names.outputs.resource_group }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Get resource names from dev.tfvars
+        id: get-names
+        run: |
+          # Extract resource names from dev.tfvars
+          RESOURCE_GROUP=$(cat azure/DTE/terraform/dev.tfvars | grep 'resource_group_name' | cut -d'=' -f2 | tr -d ' "')
+          FUNCTION_APP=$(cat azure/DTE/terraform/dev.tfvars | grep 'function_app_name' | cut -d'=' -f2 | tr -d ' "')
+          STATIC_WEB_APP=$(cat azure/DTE/terraform/dev.tfvars | grep 'static_web_app_name' | cut -d'=' -f2 | tr -d ' "')
+          
+          echo "resource_group=$RESOURCE_GROUP" >> $GITHUB_OUTPUT
+          echo "function_app_name=$FUNCTION_APP" >> $GITHUB_OUTPUT
+          
+          # Get Function App URL
+          FUNC_APP_URL=$(az functionapp show --resource-group "$RESOURCE_GROUP" --name "$FUNCTION_APP" --query defaultHostName -o tsv)
+          echo "function_app_url=https://$FUNC_APP_URL" >> $GITHUB_OUTPUT
+          
+          # Get Static Web App details
+          if [ ! -z "$STATIC_WEB_APP" ]; then
+            SWA_URL=$(az staticwebapp show --resource-group "$RESOURCE_GROUP" --name "$STATIC_WEB_APP" --query defaultHostname -o tsv 2>/dev/null || echo "")
+            echo "static_web_app_name=$STATIC_WEB_APP" >> $GITHUB_OUTPUT
+            if [ ! -z "$SWA_URL" ]; then
+              echo "static_web_app_url=https://$SWA_URL" >> $GITHUB_OUTPUT
+            fi
+          fi
+          
+          echo "✅ Resource details retrieved"
+
+  # ============================================
+  # Deploy Function App (Backend)
+  # ============================================
+  deploy-backend:
+    name: 'Deploy Function App (Python Backend)'
+    needs: get-resources
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt --target=".python_packages/lib/site-packages"
+          echo "✅ Python dependencies installed"
+
+      - name: Azure CLI Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy Function App Code
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ needs.get-resources.outputs.function_app_name }}
+          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+          scm-do-build-during-deployment: true
+          enable-oryx-build: true
+
+      - name: Verify Function App Deployment
+        run: |
+          # Wait for function app to be ready
+          sleep 10
+          
+          # Test health endpoint
+          HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "${{ needs.get-resources.outputs.function_app_url }}/api/health")
+          
+          if [ "$HEALTH_CHECK" = "200" ]; then
+            echo "✅ Function App is healthy"
+          else
+            echo "⚠️ Function App health check returned: $HEALTH_CHECK (may need more time to boot)"
+          fi
+
+  # ============================================
+  # Deploy Static Web App (Frontend)
+  # ============================================
+  deploy-frontend:
+    name: 'Deploy Static Web App (React Frontend)'
+    needs: [get-resources, deploy-backend]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - name: Install Node dependencies
+        working-directory: app/frontend
+        run: |
+          npm ci
+          echo "✅ Node dependencies installed"
+
+      - name: Build React Frontend
+        working-directory: app/frontend
+        env:
+          REACT_APP_API_URL: ${{ needs.get-resources.outputs.function_app_url }}/api
+          CI: false
+        run: |
+          npm run build
+          echo "✅ Frontend built successfully"
+          echo "API URL: $REACT_APP_API_URL"
+
+      - name: Deploy to Static Web App
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "app/frontend/build"
+          skip_app_build: true
+
+  # ============================================
+  # Verify Deployment
+  # ============================================
+  verify-deployment:
+    name: 'Verify Application Deployment'
+    needs: [get-resources, deploy-backend, deploy-frontend]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Test API Endpoints
+        run: |
+          echo "🧪 Testing API endpoints..."
+          
+          # Health check
+          HEALTH=$(curl -s -w "\n%{http_code}" "${{ needs.get-resources.outputs.function_app_url }}/api/health")
+          HTTP_CODE=$(echo "$HEALTH" | tail -n1)
+          BODY=$(echo "$HEALTH" | head -n1)
+          
+          echo "Health Check Response: $BODY"
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Health endpoint working"
+          else
+            echo "⚠️ Health endpoint returned: $HTTP_CODE"
+          fi
+
+      - name: Output Deployment URLs
+        run: |
+          echo ""
+          echo "╔═════════════════════════════════════════════════════════════╗"
+          echo "║        🎉 APPLICATION DEPLOYMENT COMPLETED 🎉              ║"
+          echo "╚═════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "📋 Deployment Summary:"
+          echo "────────────────────────────────────────────────────────────"
+          echo ""
+          echo "🌐 FRONTEND (React Application):"
+          echo "   URL: ${{ needs.get-resources.outputs.static_web_app_url }}"
+          echo ""
+          echo "⚙️  BACKEND (Python Function App):"
+          echo "   Name: ${{ needs.get-resources.outputs.function_app_name }}"
+          echo "   URL:  ${{ needs.get-resources.outputs.function_app_url }}"
+          echo ""
+          echo "📊 API ENDPOINTS:"
+          echo "   Health:        GET ${{ needs.get-resources.outputs.function_app_url }}/api/health"
+          echo "   Get Employees: GET ${{ needs.get-resources.outputs.function_app_url }}/api/employees"
+          echo "   Create:        POST ${{ needs.get-resources.outputs.function_app_url }}/api/employees"
+          echo "   Update:        PUT ${{ needs.get-resources.outputs.function_app_url }}/api/employees/{id}"
+          echo "   Delete:        DELETE ${{ needs.get-resources.outputs.function_app_url }}/api/employees/{id}"
+          echo ""
+          echo "✅ TESTING:"
+          echo "   1. Open frontend: ${{ needs.get-resources.outputs.static_web_app_url }}"
+          echo "   2. Add an employee via UI"
+          echo "   3. Should see it appear in the list"
+          echo "   4. Data persists in Cosmos DB"
+          echo ""
+          echo "────────────────────────────────────────────────────────────"
+          echo "Deploy Time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "────────────────────────────────────────────────────────────"
