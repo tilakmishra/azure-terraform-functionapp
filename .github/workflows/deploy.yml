@@ -61,10 +61,14 @@ jobs:
 
       - name: Check if resources exist
         id: check-resources
+        working-directory: .
         run: |
           # Try to get the function app - if it exists, skip terraform apply
           RESOURCE_GROUP=$(cat dev.tfvars | grep 'resource_group_name' | cut -d'=' -f2 | tr -d ' "')
           FUNCTION_APP=$(cat dev.tfvars | grep 'function_app_name' | cut -d'=' -f2 | tr -d ' "')
+          
+          echo "Resource Group: $RESOURCE_GROUP"
+          echo "Function App: $FUNCTION_APP"
           
           if az functionapp show --resource-group "$RESOURCE_GROUP" --name "$FUNCTION_APP" &>/dev/null; then
             echo "exists=true" >> $GITHUB_OUTPUT
@@ -72,6 +76,21 @@ jobs:
           else
             echo "exists=false" >> $GITHUB_OUTPUT
             echo "ℹ️ Resources not found - will deploy infrastructure"
+          fi
+
+      - name: Import existing resource group if needed
+        if: steps.check-resources.outputs.exists == 'true'
+        working-directory: .
+        run: |
+          # Import the resource group if it exists but not in terraform state
+          RESOURCE_GROUP=$(cat dev.tfvars | grep 'resource_group_name' | cut -d'=' -f2 | tr -d ' "')
+          
+          # Check if resource group is already in terraform state
+          if ! terraform state show module.resource_group.azurerm_resource_group.this &>/dev/null; then
+            echo "Importing existing resource group: $RESOURCE_GROUP"
+            terraform import module.resource_group.azurerm_resource_group.this "/subscriptions/$(az account show -q subscription_id)/resourceGroups/$RESOURCE_GROUP" || echo "⚠️ Import may have already been done"
+          else
+            echo "✅ Resource group already in Terraform state"
           fi
 
       - name: Terraform Plan
@@ -93,6 +112,7 @@ jobs:
         working-directory: .
         run: |
           terraform init
+          terraform refresh -var-file="dev.tfvars" || true
           echo "✅ Terraform initialized for existing resources"
 
       - name: Get Terraform Outputs
