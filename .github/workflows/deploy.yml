@@ -118,26 +118,99 @@ jobs:
           
           if az functionapp show --resource-group "$RESOURCE_GROUP" --name "$FUNCTION_APP" &>/dev/null; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "✅ Resources already exist - skipping infrastructure deployment"
+            echo "✅ Resources already exist - will import into state"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
             echo "ℹ️ Resources not found - will deploy infrastructure"
           fi
 
-      - name: Import existing resource group if needed
+      - name: Import existing resources into Terraform state
         if: steps.check-resources.outputs.exists == 'true'
         working-directory: .
         run: |
-          # Import the resource group if it exists but not in terraform state
-          RESOURCE_GROUP=$(cat dev.tfvars | grep 'resource_group_name' | cut -d'=' -f2 | tr -d ' "')
+          echo "📦 Importing existing Azure resources into Terraform state..."
           
-          # Check if resource group is already in terraform state
-          if ! terraform state show module.resource_group.azurerm_resource_group.this &>/dev/null; then
-            echo "Importing existing resource group: $RESOURCE_GROUP"
-            terraform import module.resource_group.azurerm_resource_group.this "/subscriptions/$(az account show -q subscription_id)/resourceGroups/$RESOURCE_GROUP" || echo "⚠️ Import may have already been done"
-          else
-            echo "✅ Resource group already in Terraform state"
-          fi
+          RESOURCE_GROUP=$(cat dev.tfvars | grep 'resource_group_name' | cut -d'=' -f2 | tr -d ' "')
+          LOCATION=$(cat dev.tfvars | grep 'location' | cut -d'=' -f2 | tr -d ' "')
+          
+          # Import Resource Group
+          echo "📋 Importing Resource Group..."
+          terraform import module.resource_group.azurerm_resource_group.this "/subscriptions/$(az account show -q --query id -o tsv)/resourceGroups/$RESOURCE_GROUP" 2>/dev/null || echo "ℹ️ Resource Group already imported"
+          
+          # Import all other resources from the resource group
+          echo "🔍 Scanning for existing resources in $RESOURCE_GROUP..."
+          
+          # Get all resources in the resource group
+          RESOURCES=$(az resource list --resource-group "$RESOURCE_GROUP" --query "[].{id:id, type:type, name:name}" -o json)
+          
+          # Function to import resources
+          import_resource() {
+            local resource_id=$1
+            local resource_type=$2
+            local resource_name=$3
+            
+            # Map Azure resource types to Terraform addresses
+            case "$resource_type" in
+              "Microsoft.Network/virtualNetworks")
+                echo "📡 Importing VNet: $resource_name"
+                terraform import module.virtualnetwork.azurerm_virtual_network.this "$resource_id" 2>/dev/null || echo "ℹ️ VNet already imported"
+                ;;
+              "Microsoft.Network/networkSecurityGroups")
+                echo "🛡️  Importing NSG: $resource_name"
+                # NSGs are imported in subnet module, skip for now
+                ;;
+              "Microsoft.Network/virtualNetworks/subnets")
+                echo "🌐 Importing Subnet: $resource_name"
+                # Subnets are imported in subnet module, skip for now
+                ;;
+              "Microsoft.Compute/virtualMachines")
+                echo "💻 Importing VM: $resource_name"
+                terraform import module.vm.azurerm_linux_virtual_machine.main "$resource_id" 2>/dev/null || echo "ℹ️ VM already imported"
+                ;;
+              "Microsoft.Web/sites")
+                echo "⚙️  Importing Function App: $resource_name"
+                FUNCTION_APP_NAME=$(cat dev.tfvars | grep 'function_app_name' | cut -d'=' -f2 | tr -d ' "')
+                terraform import module.function_app.azurerm_linux_function_app.main "$RESOURCE_GROUP/$FUNCTION_APP_NAME" 2>/dev/null || echo "ℹ️ Function App already imported"
+                ;;
+              "Microsoft.DocumentDB/databaseAccounts")
+                echo "📊 Importing Cosmos DB: $resource_name"
+                COSMOS_NAME=$(cat dev.tfvars | grep 'cosmos_db_account_name' | cut -d'=' -f2 | tr -d ' "')
+                terraform import module.cosmos_db.azurerm_cosmosdb_account.this "$RESOURCE_GROUP/$COSMOS_NAME" 2>/dev/null || echo "ℹ️ Cosmos DB already imported"
+                ;;
+              "Microsoft.KeyVault/vaults")
+                echo "🔐 Importing Key Vault: $resource_name"
+                KV_NAME=$(cat dev.tfvars | grep 'key_vault_name' | cut -d'=' -f2 | tr -d ' "')
+                terraform import module.key_vault.azurerm_key_vault.this "$RESOURCE_GROUP/$KV_NAME" 2>/dev/null || echo "ℹ️ Key Vault already imported"
+                ;;
+              "Microsoft.Storage/storageAccounts")
+                echo "💾 Importing Storage Account: $resource_name"
+                # Skip terraform state storage account
+                if [[ ! "$resource_name" =~ "tfstate" ]]; then
+                  terraform import module.storage.azurerm_storage_account.main "$RESOURCE_GROUP/$resource_name" 2>/dev/null || echo "ℹ️ Storage already imported"
+                fi
+                ;;
+              "Microsoft.Web/staticSites")
+                echo "🌐 Importing Static Web App: $resource_name"
+                SWA_NAME=$(cat dev.tfvars | grep 'static_web_app_name' | cut -d'=' -f2 | tr -d ' "')
+                terraform import module.static_web_app.azurerm_static_web_app.main "$RESOURCE_GROUP/$SWA_NAME" 2>/dev/null || echo "ℹ️ Static Web App already imported"
+                ;;
+              "Microsoft.Insights/components")
+                echo "📈 Importing Application Insights: $resource_name"
+                APP_INSIGHTS_NAME=$(cat dev.tfvars | grep 'app_insights_name' | cut -d'=' -f2 | tr -d ' "')
+                terraform import "module.app_insights[0].azurerm_application_insights.main" "$RESOURCE_GROUP/$APP_INSIGHTS_NAME" 2>/dev/null || echo "ℹ️ App Insights already imported"
+                ;;
+              *)
+                echo "⏭️  Skipping $resource_type: $resource_name"
+                ;;
+            esac
+          }
+          
+          # Parse and import each resource
+          echo "$RESOURCES" | jq -r '.[] | "\(.id)|\(.type)|\(.name)"' | while IFS='|' read -r resource_id resource_type resource_name; do
+            import_resource "$resource_id" "$resource_type" "$resource_name"
+          done
+          
+          echo "✅ Resource import complete"
 
       - name: Terraform Plan
         if: steps.check-resources.outputs.exists == 'false'
