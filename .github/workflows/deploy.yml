@@ -41,11 +41,48 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Create Terraform Backend Infrastructure
+        run: |
+          echo "🔧 Setting up Terraform backend..."
+          
+          # Backend configuration
+          RG_NAME="rg-terraform-state"
+          STORAGE_NAME="tfstateemp"
+          CONTAINER_NAME="tfstate"
+          LOCATION="eastus"
+          
+          # Create resource group if it doesn't exist
+          echo "Creating resource group: $RG_NAME"
+          az group create --name "$RG_NAME" --location "$LOCATION" 2>/dev/null || echo "ℹ️  Resource group already exists"
+          
+          # Create storage account if it doesn't exist
+          echo "Creating storage account: $STORAGE_NAME"
+          az storage account create \
+            --resource-group "$RG_NAME" \
+            --name "$STORAGE_NAME" \
+            --sku Standard_LRS \
+            --kind StorageV2 \
+            --https-only true \
+            2>/dev/null || echo "ℹ️  Storage account already exists"
+          
+          # Create container if it doesn't exist
+          echo "Creating storage container: $CONTAINER_NAME"
+          az storage container create \
+            --account-name "$STORAGE_NAME" \
+            --name "$CONTAINER_NAME" \
+            2>/dev/null || echo "ℹ️  Container already exists"
+          
+          echo "✅ Terraform backend infrastructure ready"
+
       - name: Terraform Init
         working-directory: .
         run: |
-          terraform init
-          echo "✅ Terraform initialized"
+          terraform init \
+            -backend-config="resource_group_name=rg-terraform-state" \
+            -backend-config="storage_account_name=tfstateemp" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=terraform.tfstate"
+          echo "✅ Terraform initialized with remote backend"
 
       - name: Terraform Validate
         working-directory: .
