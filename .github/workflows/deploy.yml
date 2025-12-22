@@ -59,22 +59,49 @@ jobs:
           terraform fmt -recursive -check || true
           echo "✅ Terraform format checked"
 
+      - name: Check if resources exist
+        id: check-resources
+        run: |
+          # Try to get the function app - if it exists, skip terraform apply
+          RESOURCE_GROUP=$(cat dev.tfvars | grep 'resource_group_name' | cut -d'=' -f2 | tr -d ' "')
+          FUNCTION_APP=$(cat dev.tfvars | grep 'function_app_name' | cut -d'=' -f2 | tr -d ' "')
+          
+          if az functionapp show --resource-group "$RESOURCE_GROUP" --name "$FUNCTION_APP" &>/dev/null; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Resources already exist - skipping infrastructure deployment"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ Resources not found - will deploy infrastructure"
+          fi
+
       - name: Terraform Plan
+        if: steps.check-resources.outputs.exists == 'false'
         working-directory: .
         run: |
           terraform plan -var-file="dev.tfvars" -out=tfplan
           echo "✅ Terraform plan created"
 
       - name: Terraform Apply
+        if: steps.check-resources.outputs.exists == 'false'
         working-directory: .
         run: |
           terraform apply -auto-approve tfplan
           echo "✅ Infrastructure deployed"
+        
+      - name: Initialize Terraform for existing resources
+        if: steps.check-resources.outputs.exists == 'true'
+        working-directory: .
+        run: |
+          terraform init
+          echo "✅ Terraform initialized for existing resources"
 
       - name: Get Terraform Outputs
         id: terraform-output
         working-directory: .
         run: |
+          # Refresh state if resources already exist
+          terraform refresh -var-file="dev.tfvars" || true
+          
           echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
           echo "function_app_url=$(terraform output -raw function_app_url)" >> $GITHUB_OUTPUT
           echo "static_web_app_name=$(terraform output -raw static_web_app_name)" >> $GITHUB_OUTPUT
