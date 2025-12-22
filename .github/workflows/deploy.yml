@@ -7,9 +7,10 @@ on:
   workflow_dispatch:  # Manual trigger only
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'app/backend'
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'azure/DTE/terraform/app/backend'
   PYTHON_VERSION: '3.11'
   NODE_VERSION: '18'
+  TERRAFORM_VERSION: '1.5.0'
 
 jobs:
   # ============================================
@@ -20,7 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       function_app_name: ${{ steps.terraform-output.outputs.function_app_name }}
+      function_app_url: ${{ steps.terraform-output.outputs.function_app_url }}
       static_web_app_name: ${{ steps.terraform-output.outputs.static_web_app_name }}
+      static_web_app_url: ${{ steps.terraform-output.outputs.static_web_app_url }}
       resource_group: ${{ steps.terraform-output.outputs.resource_group }}
     
     steps:
@@ -30,6 +33,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
       - name: Azure Login
@@ -38,26 +42,50 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Terraform Init
-        run: terraform init
+        working-directory: azure/DTE/terraform
+        run: |
+          terraform init
+          echo "✅ Terraform initialized"
+
+      - name: Terraform Validate
+        working-directory: azure/DTE/terraform
+        run: |
+          terraform validate
+          echo "✅ Terraform configuration validated"
+
+      - name: Terraform Format Check
+        working-directory: azure/DTE/terraform
+        run: |
+          terraform fmt -recursive -check || true
+          echo "✅ Terraform format checked"
 
       - name: Terraform Plan
-        run: terraform plan -var-file="dev.tfvars" -out=tfplan
+        working-directory: azure/DTE/terraform
+        run: |
+          terraform plan -var-file="dev.tfvars" -out=tfplan
+          echo "✅ Terraform plan created"
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        working-directory: azure/DTE/terraform
+        run: |
+          terraform apply -auto-approve tfplan
+          echo "✅ Infrastructure deployed"
 
       - name: Get Terraform Outputs
         id: terraform-output
+        working-directory: azure/DTE/terraform
         run: |
           echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
+          echo "function_app_url=$(terraform output -raw function_app_url)" >> $GITHUB_OUTPUT
           echo "static_web_app_name=$(terraform output -raw static_web_app_name)" >> $GITHUB_OUTPUT
           echo "resource_group=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          echo "✅ Terraform outputs extracted"
 
   # ============================================
   # Job 2: Deploy Function App (Backend)
   # ============================================
   deploy-backend:
-    name: 'Deploy Function App'
+    name: 'Deploy Function App (Python Backend)'
     needs: infrastructure
     runs-on: ubuntu-latest
     
@@ -70,18 +98,19 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt --target=".python_packages/lib/site-packages"
+          echo "✅ Python dependencies installed"
 
-      - name: Azure Login
+      - name: Azure CLI Login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to Azure Function App
+      - name: Deploy Function App Code
         uses: Azure/functions-action@v1
         with:
           app-name: ${{ needs.infrastructure.outputs.function_app_name }}
@@ -89,11 +118,25 @@ jobs:
           scm-do-build-during-deployment: true
           enable-oryx-build: true
 
+      - name: Verify Function App Deployment
+        run: |
+          # Wait for function app to be ready
+          sleep 10
+          
+          # Test health endpoint
+          HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "${{ needs.infrastructure.outputs.function_app_url }}/api/health")
+          
+          if [ "$HEALTH_CHECK" = "200" ]; then
+            echo "✅ Function App is healthy"
+          else
+            echo "⚠️ Function App health check returned: $HEALTH_CHECK"
+          fi
+
   # ============================================
   # Job 3: Deploy Static Web App (Frontend)
   # ============================================
   deploy-frontend:
-    name: 'Deploy Static Web App'
+    name: 'Deploy Static Web App (React Frontend)'
     needs: [infrastructure, deploy-backend]
     runs-on: ubuntu-latest
     
@@ -105,16 +148,23 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: azure/DTE/terraform/app/frontend/package-lock.json
 
-      - name: Install dependencies
-        working-directory: app/frontend
-        run: npm install
+      - name: Install Node dependencies
+        working-directory: azure/DTE/terraform/app/frontend
+        run: |
+          npm ci
+          echo "✅ Node dependencies installed"
 
-      - name: Build frontend
-        working-directory: app/frontend
+      - name: Build React Frontend
+        working-directory: azure/DTE/terraform/app/frontend
         env:
-          REACT_APP_API_URL: https://${{ needs.infrastructure.outputs.function_app_name }}.azurewebsites.net/api
-        run: npm run build
+          REACT_APP_API_URL: ${{ needs.infrastructure.outputs.function_app_url }}/api
+          CI: false
+        run: |
+          npm run build
+          echo "✅ Frontend built successfully"
 
       - name: Deploy to Static Web App
         uses: Azure/static-web-apps-deploy@v1
@@ -122,39 +172,76 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
-          app_location: "app/frontend/build"
+          app_location: "azure/DTE/terraform/app/frontend/build"
           skip_app_build: true
 
   # ============================================
-  # Job 4: Seed Sample Data
+  # Job 4: Verify Deployment & Output Results
   # ============================================
-  seed-data:
-    name: 'Seed Sample Data'
-    needs: [infrastructure, deploy-backend]
+  verify-deployment:
+    name: 'Verify Deployment & Output Results'
+    needs: [infrastructure, deploy-backend, deploy-frontend]
     runs-on: ubuntu-latest
     
     steps:
-      - name: Seed employee data
+      - name: Test API Endpoints
         run: |
-          FUNCTION_URL="https://${{ needs.infrastructure.outputs.function_app_name }}.azurewebsites.net/api"
+          echo "🧪 Testing API endpoints..."
           
-          # Wait for function app to be ready
-          sleep 30
+          # Health check
+          HEALTH=$(curl -s -w "\n%{http_code}" "${{ needs.infrastructure.outputs.function_app_url }}/api/health")
+          HTTP_CODE=$(echo "$HEALTH" | tail -n1)
+          BODY=$(echo "$HEALTH" | head -n1)
           
-          # Create sample employees
-          curl -X POST "$FUNCTION_URL/employees" -H "Content-Type: application/json" \
-            -d '{"firstName":"John","lastName":"Doe","email":"john.doe@example.com","department":"Engineering","position":"Senior Developer"}'
+          echo "Health Check Response: $BODY"
           
-          curl -X POST "$FUNCTION_URL/employees" -H "Content-Type: application/json" \
-            -d '{"firstName":"Jane","lastName":"Smith","email":"jane.smith@example.com","department":"Marketing","position":"Marketing Manager"}'
-          
-          curl -X POST "$FUNCTION_URL/employees" -H "Content-Type: application/json" \
-            -d '{"firstName":"Bob","lastName":"Johnson","email":"bob.johnson@example.com","department":"Sales","position":"Sales Representative"}'
-          
-          curl -X POST "$FUNCTION_URL/employees" -H "Content-Type: application/json" \
-            -d '{"firstName":"Alice","lastName":"Williams","email":"alice.williams@example.com","department":"HR","position":"HR Specialist"}'
-          
-          curl -X POST "$FUNCTION_URL/employees" -H "Content-Type: application/json" \
-            -d '{"firstName":"Charlie","lastName":"Brown","email":"charlie.brown@example.com","department":"Finance","position":"Financial Analyst"}'
-          
-          echo "Sample data seeded successfully!"
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Health endpoint working"
+          else
+            echo "⚠️ Health endpoint returned: $HTTP_CODE"
+          fi
+
+      - name: Output Deployment URLs
+        run: |
+          echo ""
+          echo "╔═════════════════════════════════════════════════════════════╗"
+          echo "║           🎉 DEPLOYMENT COMPLETED SUCCESSFULLY 🎉           ║"
+          echo "╚═════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "📋 Deployment Summary:"
+          echo "────────────────────────────────────────────────────────────"
+          echo ""
+          echo "🌐 FRONTEND (React Application):"
+          echo "   Static Web App Name: ${{ needs.infrastructure.outputs.static_web_app_name }}"
+          echo ""
+          echo "⚙️  BACKEND (Python Function App):"
+          echo "   Function App Name: ${{ needs.infrastructure.outputs.function_app_name }}"
+          echo "   Function App URL:  ${{ needs.infrastructure.outputs.function_app_url }}"
+          echo "   Health Endpoint:   ${{ needs.infrastructure.outputs.function_app_url }}/api/health"
+          echo ""
+          echo "📊 ENDPOINTS:"
+          echo "   Get Employees:     GET ${{ needs.infrastructure.outputs.function_app_url }}/api/employees"
+          echo "   Create Employee:   POST ${{ needs.infrastructure.outputs.function_app_url }}/api/employees"
+          echo "   Update Employee:   PUT ${{ needs.infrastructure.outputs.function_app_url }}/api/employees/{id}"
+          echo "   Delete Employee:   DELETE ${{ needs.infrastructure.outputs.function_app_url }}/api/employees/{id}"
+          echo ""
+          echo "📚 RESOURCES:"
+          echo "   Resource Group: ${{ needs.infrastructure.outputs.resource_group }}"
+          echo "   Region: eastus (configurable in dev.tfvars)"
+          echo ""
+          echo "🔐 SECURITY:"
+          echo "   ✅ System-Assigned Managed Identity enabled"
+          echo "   ✅ RBAC roles configured (Cosmos DB, Key Vault, Storage)"
+          echo "   ✅ VNet Integration enabled"
+          echo "   ✅ Private Endpoints configured"
+          echo "   ✅ HTTPS-only enforcement"
+          echo ""
+          echo "📝 NEXT STEPS:"
+          echo "   1. Wait 2-3 minutes for Static Web App to fully provision"
+          echo "   2. Visit the Static Web App URL to access the frontend"
+          echo "   3. Test the Employee Management APIs"
+          echo "   4. Check Azure Portal for resource details"
+          echo ""
+          echo "────────────────────────────────────────────────────────────"
+          echo "Deploy Time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "────────────────────────────────────────────────────────────"

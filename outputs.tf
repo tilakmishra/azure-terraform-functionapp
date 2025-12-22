@@ -43,6 +43,21 @@ output "function_app_hostname" {
   value       = module.function_app.default_hostname
 }
 
+output "function_app_url" {
+  description = "Function App HTTPS URL"
+  value       = "https://${module.function_app.default_hostname}"
+}
+
+output "function_app_principal_id" {
+  description = "Function App Managed Identity Principal ID (for RBAC assignments)"
+  value       = module.function_app.identity_principal_id
+}
+
+output "function_app_tenant_id" {
+  description = "Function App Managed Identity Tenant ID"
+  value       = module.function_app.identity_tenant_id
+}
+
 # Static Web App
 output "static_web_app_id" {
   description = "Static Web App ID"
@@ -57,6 +72,17 @@ output "static_web_app_name" {
 output "static_web_app_hostname" {
   description = "Static Web App hostname"
   value       = module.static_web_app.default_host_name
+}
+
+output "static_web_app_url" {
+  description = "Static Web App HTTPS URL"
+  value       = "https://${module.static_web_app.default_host_name}"
+}
+
+output "static_web_app_deployment_token" {
+  description = "Static Web App deployment token for GitHub Actions (add to GitHub Secrets as AZURE_STATIC_WEB_APPS_API_TOKEN)"
+  value       = module.static_web_app.deployment_token
+  sensitive   = true
 }
 
 # Cosmos DB

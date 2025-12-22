@@ -1,4 +1,20 @@
+# ============================================
+# Documentation (personal reference - not for GitHub)
+# ============================================
+SECURITY_IMPLEMENTATION.md
+DEPLOYMENT_GUIDE.md
+QUICK_REFERENCE.md
+INTERVIEW_SUBMISSION_SUMMARY.md
+CHANGES_SUMMARY.md
+ARCHITECTURE_DECISIONS.md
+GITHUB_ACTIONS_CI_CD.md
+ARCHITECTURE_AND_WORKFLOW_SUMMARY.md
+COMPLETE_SOLUTION.md
+VISUAL_ARCHITECTURE_SUMMARY.md
+
+# ============================================
 # Terraform
+# ============================================
 .terraform/
 *.tfstate
 *.tfstate.*

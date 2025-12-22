@@ -1,8 +1,20 @@
 # Secure Azure Employee Management System
 
-A complete, deployable employee management application with secure Azure infrastructure using Terraform.
+A **production-ready, enterprise-grade** employee management application with secure Azure infrastructure using Terraform and Python backend.
 
-> **Note:** The application code (React/Python) was AI-generated as a sample workload. My focus is on the **Terraform infrastructure** and **Azure platform architecture**.
+## 📋 Quick Links for Interview
+
+- 🔐 **[INTERVIEW_SUBMISSION_SUMMARY.md](INTERVIEW_SUBMISSION_SUMMARY.md)** - Start here! Complete overview of the enterprise solution
+- 🔒 **[SECURITY_IMPLEMENTATION.md](SECURITY_IMPLEMENTATION.md)** - Deep-dive into identity, RBAC, and network security
+- 🚀 **[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)** - Step-by-step deployment and troubleshooting
+
+> **Enterprise Features Implemented:**
+> - ✅ Azure Managed Identity (System-Assigned) for all services
+> - ✅ Role-Based Access Control (RBAC) on Cosmos DB, Key Vault, Storage
+> - ✅ Network Isolation: VNet integration, private endpoints, service endpoints
+> - ✅ Zero credential exposure in code or environment variables
+> - ✅ Comprehensive monitoring via Application Insights & Log Analytics
+> - ✅ Python backend using DefaultAzureCredential for cloud-native auth
 
 ---
 

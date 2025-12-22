@@ -9,9 +9,9 @@
 set -e
 
 # Configuration - UPDATE THESE
-RESOURCE_GROUP="rg-dte-dev-eastus"
-FUNCTION_APP_NAME="func-dte-dev-eastus"
-STATIC_WEB_APP_NAME="swa-dte-dev-eastus"
+RESOURCE_GROUP="rg-emp-dev"
+FUNCTION_APP_NAME="func-emp-dev-gr0j"
+STATIC_WEB_APP_NAME="swa-dte-dev-gr0j"
 REPO_URL="https://github.com/tilakmishra/azure-terraform-webapp.git"
 
 echo "============================================"
