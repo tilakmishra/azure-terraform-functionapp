@@ -7,7 +7,7 @@ on:
   workflow_dispatch:  # Manual trigger only
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'azure/DTE/terraform/app/backend'
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'app/backend'
   PYTHON_VERSION: '3.11'
   NODE_VERSION: '18'
   TERRAFORM_VERSION: '1.5.0'
@@ -42,38 +42,38 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Terraform Init
-        working-directory: azure/DTE/terraform
+        working-directory: .
         run: |
           terraform init
           echo "✅ Terraform initialized"
 
       - name: Terraform Validate
-        working-directory: azure/DTE/terraform
+        working-directory: .
         run: |
           terraform validate
           echo "✅ Terraform configuration validated"
 
       - name: Terraform Format Check
-        working-directory: azure/DTE/terraform
+        working-directory: .
         run: |
           terraform fmt -recursive -check || true
           echo "✅ Terraform format checked"
 
       - name: Terraform Plan
-        working-directory: azure/DTE/terraform
+        working-directory: .
         run: |
           terraform plan -var-file="dev.tfvars" -out=tfplan
           echo "✅ Terraform plan created"
 
       - name: Terraform Apply
-        working-directory: azure/DTE/terraform
+        working-directory: .
         run: |
           terraform apply -auto-approve tfplan
           echo "✅ Infrastructure deployed"
 
       - name: Get Terraform Outputs
         id: terraform-output
-        working-directory: azure/DTE/terraform
+        working-directory: .
         run: |
           echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
           echo "function_app_url=$(terraform output -raw function_app_url)" >> $GITHUB_OUTPUT
@@ -149,16 +149,16 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: azure/DTE/terraform/app/frontend/package-lock.json
+          cache-dependency-path: app/frontend/package-lock.json
 
       - name: Install Node dependencies
-        working-directory: azure/DTE/terraform/app/frontend
+        working-directory: app/frontend
         run: |
           npm ci
           echo "✅ Node dependencies installed"
 
       - name: Build React Frontend
-        working-directory: azure/DTE/terraform/app/frontend
+        working-directory: app/frontend
         env:
           REACT_APP_API_URL: ${{ needs.infrastructure.outputs.function_app_url }}/api
           CI: false
@@ -172,7 +172,7 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
-          app_location: "azure/DTE/terraform/app/frontend/build"
+          app_location: "app/frontend/build"
           skip_app_build: true
 
   # ============================================
