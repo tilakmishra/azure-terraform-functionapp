@@ -315,17 +315,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: app/frontend/package-lock.json
+          
 
       - name: Install Node dependencies
-        working-directory: app/frontend
+        working-directory: azure/DTE/employee-management-app/frontend
         run: |
           npm ci
           echo "✅ Node dependencies installed"
 
       - name: Build React Frontend
-        working-directory: app/frontend
+        working-directory: azure/DTE/employee-management-app/frontend
         env:
           REACT_APP_API_URL: ${{ needs.infrastructure.outputs.function_app_url }}/api
           CI: false
@@ -339,7 +338,7 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
-          app_location: "app/frontend/build"
+          app_location: "azure/DTE/employee-management-app/frontend/build"
           skip_app_build: true
 
   # ============================================
