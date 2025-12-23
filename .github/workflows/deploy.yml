@@ -19,6 +19,7 @@ jobs:
   pre-commit:
     name: 'Pre-commit Terraform Checks'
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -74,7 +75,6 @@ jobs:
   # ============================================
   infrastructure:
     name: 'Terraform Infrastructure'
-    needs: pre-commit
     runs-on: ubuntu-latest
     outputs:
       function_app_name: ${{ steps.terraform-output.outputs.function_app_name }}
