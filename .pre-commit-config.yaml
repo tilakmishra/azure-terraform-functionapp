@@ -17,8 +17,8 @@ repos:
     hooks:
       - id: terraform_fmt
       - id: terraform_validate
-      - id: terraform_tflint
-      # tfsec requires separate binary installation - disabled for now
+      # tflint and tfsec require separate binary installations - disabled for simplicity
+      # - id: terraform_tflint
       # - id: terraform_tfsec
       # Optional: auto-generate module docs (keeps README for modules fresh)
       # - id: terraform_docs
