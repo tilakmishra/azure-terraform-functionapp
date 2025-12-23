@@ -49,7 +49,7 @@ resource "azurerm_network_security_rule" "function_app_inbound" {
   network_security_group_name = azurerm_network_security_group.nsgs["function_app"].name
 }
 
-resource "azurerm_network_security_rule" "function_app_outbound_to_privateendpoints" {
+resource "azurerm_network_security_rule" "function_app_outbound_to_vnet" {
   count = contains(keys(var.subnet_configs), "function_app") ? 1 : 0
 
   name                        = "allow-outbound-to-vnet"
@@ -61,6 +61,54 @@ resource "azurerm_network_security_rule" "function_app_outbound_to_privateendpoi
   destination_port_range      = "443"
   source_address_prefix       = "VirtualNetwork"
   destination_address_prefix  = "VirtualNetwork"
+  resource_group_name         = data.azurerm_resource_group.rg.name
+  network_security_group_name = azurerm_network_security_group.nsgs["function_app"].name
+}
+
+resource "azurerm_network_security_rule" "function_app_outbound_to_cosmos" {
+  count = contains(keys(var.subnet_configs), "function_app") ? 1 : 0
+
+  name                        = "allow-outbound-to-cosmosdb"
+  priority                    = 110
+  direction                   = "Outbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "443"
+  source_address_prefix       = "VirtualNetwork"
+  destination_address_prefix  = "AzureCosmosDB"
+  resource_group_name         = data.azurerm_resource_group.rg.name
+  network_security_group_name = azurerm_network_security_group.nsgs["function_app"].name
+}
+
+resource "azurerm_network_security_rule" "function_app_outbound_to_keyvault" {
+  count = contains(keys(var.subnet_configs), "function_app") ? 1 : 0
+
+  name                        = "allow-outbound-to-keyvault"
+  priority                    = 120
+  direction                   = "Outbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "443"
+  source_address_prefix       = "VirtualNetwork"
+  destination_address_prefix  = "AzureKeyVault"
+  resource_group_name         = data.azurerm_resource_group.rg.name
+  network_security_group_name = azurerm_network_security_group.nsgs["function_app"].name
+}
+
+resource "azurerm_network_security_rule" "function_app_outbound_to_storage" {
+  count = contains(keys(var.subnet_configs), "function_app") ? 1 : 0
+
+  name                        = "allow-outbound-to-storage"
+  priority                    = 130
+  direction                   = "Outbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "443"
+  source_address_prefix       = "VirtualNetwork"
+  destination_address_prefix  = "Storage"
   resource_group_name         = data.azurerm_resource_group.rg.name
   network_security_group_name = azurerm_network_security_group.nsgs["function_app"].name
 }
