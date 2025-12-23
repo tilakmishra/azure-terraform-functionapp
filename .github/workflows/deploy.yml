@@ -14,6 +14,31 @@ env:
 
 jobs:
   # ============================================
+  # Job 0: Detect Changes (backend/frontend)
+  # ============================================
+  changes:
+    name: 'Detect Changed Paths'
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Paths filter
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # For workflow_dispatch, compares current commit to previous commit
+          # Adjust filters to your project structure
+          filters: |
+            backend:
+              - 'azure/DTE/terraform/app/backend/**'
+            frontend:
+              - 'azure/DTE/terraform/app/frontend/**'
+
+  # ============================================
   # Job 1: Deploy Infrastructure with Terraform
   # ============================================
   infrastructure:
@@ -253,7 +278,8 @@ jobs:
   # ============================================
   deploy-backend:
     name: 'Deploy Function App (Python Backend)'
-    needs: infrastructure
+    needs: [changes, infrastructure]
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     
     steps:
@@ -304,7 +330,8 @@ jobs:
   # ============================================
   deploy-frontend:
     name: 'Deploy Static Web App (React Frontend)'
-    needs: [infrastructure, deploy-backend]
+    needs: [changes, infrastructure]
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     
     steps:
@@ -318,13 +345,13 @@ jobs:
           
 
       - name: Install Node dependencies
-        working-directory: azure/DTE/employee-management-app/frontend
+        working-directory: app/frontend
         run: |
           npm ci
           echo "✅ Node dependencies installed"
 
       - name: Build React Frontend
-        working-directory: azure/DTE/employee-management-app/frontend
+        working-directory: app/frontend
         env:
           REACT_APP_API_URL: ${{ needs.infrastructure.outputs.function_app_url }}/api
           CI: false
@@ -338,7 +365,7 @@ jobs:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: "upload"
-          app_location: "azure/DTE/employee-management-app/frontend/build"
+          app_location: "app/frontend/build"
           skip_app_build: true
 
   # ============================================
@@ -346,7 +373,8 @@ jobs:
   # ============================================
   verify-deployment:
     name: 'Verify Deployment & Output Results'
-    needs: [infrastructure, deploy-backend, deploy-frontend]
+    needs: [changes, infrastructure, deploy-backend, deploy-frontend]
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     
     steps:
