@@ -1,0 +1,28 @@
+default_language_version:
+  python: python3
+
+# Top-level excludes applied to all hooks
+exclude: |
+  (?x)^(
+    .*/\.terraform/|
+    .*/terraform\.tfstate.*|
+    .*/generated_.*\.tf|
+    .*/deployment-temp/.*|
+    .*/node_modules/.*
+  )$
+
+repos:
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.77.0
+    hooks:
+      - id: terraform_fmt
+      - id: terraform_validate
+      - id: terraform_tflint
+        args:
+          - --minimum-severity=warning
+      # tfsec requires separate binary installation - disabled for now
+      # - id: terraform_tfsec
+      # Optional: auto-generate module docs (keeps README for modules fresh)
+      # - id: terraform_docs
+      #   args:
+      #     - --args=--sort=true
