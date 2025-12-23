@@ -18,8 +18,6 @@ repos:
       - id: terraform_fmt
       - id: terraform_validate
       - id: terraform_tflint
-        args:
-          - --minimum-severity=warning
       # tfsec requires separate binary installation - disabled for now
       # - id: terraform_tfsec
       # Optional: auto-generate module docs (keeps README for modules fresh)
