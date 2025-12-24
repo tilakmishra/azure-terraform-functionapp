@@ -17,17 +17,32 @@ from azure.cosmos import CosmosClient, PartitionKey, exceptions
 def get_cosmos_client():
     """Get Cosmos DB client using endpoint and key from environment"""
     endpoint = os.environ.get("CosmosDbEndpoint")
-    # Try managed identity first, fall back to connection string
-    try:
-        from azure.identity import DefaultAzureCredential
-        credential = DefaultAzureCredential()
-        return CosmosClient(endpoint, credential=credential)
-    except Exception:
-        # Fall back to connection string if managed identity fails
-        connection_string = os.environ.get("CosmosDbConnectionString")
-        if connection_string:
-            return CosmosClient.from_connection_string(connection_string)
-        raise Exception("No valid Cosmos DB credentials found")
+    key = os.environ.get("CosmosDbKey")
+    connection_string = os.environ.get("CosmosDbConnectionString")
+    
+    # Debug logging
+    logging.info(f"Cosmos DB endpoint: {endpoint}")
+    logging.info(f"Cosmos DB key exists: {bool(key)}")
+    logging.info(f"Cosmos DB connection string exists: {bool(connection_string)}")
+    
+    # Try connection string first (most reliable)
+    if connection_string:
+        return CosmosClient.from_connection_string(connection_string)
+    
+    # Try endpoint + key
+    if endpoint and key:
+        return CosmosClient(endpoint, key)
+    
+    # Try managed identity as fallback
+    if endpoint:
+        try:
+            from azure.identity import DefaultAzureCredential
+            credential = DefaultAzureCredential()
+            return CosmosClient(endpoint, credential=credential)
+        except Exception as e:
+            logging.error(f"Managed identity failed: {str(e)}")
+    
+    raise Exception("No valid Cosmos DB credentials found. Please check CosmosDbConnectionString, CosmosDbEndpoint, or CosmosDbKey environment variables.")
 
 def get_container():
     """Get the employees container"""
@@ -49,6 +64,50 @@ def health_check(req: func.HttpRequest) -> func.HttpResponse:
         mimetype="application/json",
         status_code=200
     )
+
+# ============================================================================
+# Diagnostics - Check environment and connectivity
+# ============================================================================
+@app.route(route="diagnostics", methods=["GET"])
+def diagnostics(req: func.HttpRequest) -> func.HttpResponse:
+    """Diagnostics endpoint to check configuration"""
+    try:
+        # Check environment variables
+        env_vars = {
+            "CosmosDbEndpoint": bool(os.environ.get("CosmosDbEndpoint")),
+            "CosmosDbKey": bool(os.environ.get("CosmosDbKey")), 
+            "CosmosDbConnectionString": bool(os.environ.get("CosmosDbConnectionString")),
+            "CosmosDbDatabaseName": os.environ.get("CosmosDbDatabaseName", "employeedb"),
+            "CosmosDbContainerName": os.environ.get("CosmosDbContainerName", "employees")
+        }
+        
+        # Test Cosmos DB connection
+        cosmos_status = "unknown"
+        try:
+            client = get_cosmos_client()
+            # Try to get database info
+            database_name = os.environ.get("CosmosDbDatabaseName", "employeedb") 
+            database = client.get_database_client(database_name)
+            database_properties = database.read()
+            cosmos_status = "connected"
+        except Exception as e:
+            cosmos_status = f"failed: {str(e)}"
+        
+        return func.HttpResponse(
+            json.dumps({
+                "environment_variables": env_vars,
+                "cosmos_db_status": cosmos_status,
+                "timestamp": datetime.utcnow().isoformat()
+            }),
+            mimetype="application/json",
+            status_code=200
+        )
+    except Exception as e:
+        return func.HttpResponse(
+            json.dumps({"error": str(e)}),
+            mimetype="application/json", 
+            status_code=500
+        )
 
 
 # ============================================================================
