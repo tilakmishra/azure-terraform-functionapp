@@ -18,8 +18,22 @@
     }
   },
   "cors": {
-    "allowedOrigins": ["*"],
-    "allowedMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    "allowedHeaders": ["Content-Type", "Authorization"]
+    "allowedOrigins": [
+      "https://white-hill-0cb38030f.2.azurestaticapps.net",
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "*",
+      "http://localhost:8080"
+    ],
+    "allowedMethods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
+    "allowedHeaders": [
+      "Content-Type", 
+      "Authorization", 
+      "X-Requested-With",
+      "Accept",
+      "Origin",
+      "Access-Control-Allow-Origin"
+    ],
+    "supportCredentials": false
   }
 }
