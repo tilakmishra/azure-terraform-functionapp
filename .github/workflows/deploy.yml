@@ -5,6 +5,22 @@ on:
   # push:
   #   branches: [main]
   workflow_dispatch:  # Manual trigger only
+    inputs:
+      deploy_backend:
+        description: 'Deploy Backend Function App'
+        required: false
+        type: boolean
+        default: true
+      deploy_frontend:
+        description: 'Deploy Frontend Static Web App'
+        required: false
+        type: boolean
+        default: true
+      force_deploy:
+        description: 'Force deploy even if no changes detected'
+        required: false
+        type: boolean
+        default: true
 
 env:
   AZURE_FUNCTIONAPP_PACKAGE_PATH: 'app/backend'
@@ -54,6 +70,8 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      should_deploy_backend: ${{ steps.determine.outputs.should_deploy_backend }}
+      should_deploy_frontend: ${{ steps.determine.outputs.should_deploy_frontend }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -62,13 +80,36 @@ jobs:
         id: filter
         uses: dorny/paths-filter@v3
         with:
-          # For workflow_dispatch, compares current commit to previous commit
-          # Adjust filters to your project structure
           filters: |
             backend:
+              - 'app/backend/**'
               - 'azure/DTE/terraform/app/backend/**'
             frontend:
+              - 'app/frontend/**'
               - 'azure/DTE/terraform/app/frontend/**'
+
+      - name: Determine deployment strategy
+        id: determine
+        run: |
+          # If force_deploy is true or manual deploy inputs are set, deploy accordingly
+          FORCE_DEPLOY="${{ github.event.inputs.force_deploy }}"
+          DEPLOY_BACKEND="${{ github.event.inputs.deploy_backend }}"
+          DEPLOY_FRONTEND="${{ github.event.inputs.deploy_frontend }}"
+          
+          # Default to true if not set (for backward compatibility)
+          FORCE_DEPLOY="${FORCE_DEPLOY:-true}"
+          DEPLOY_BACKEND="${DEPLOY_BACKEND:-true}"
+          DEPLOY_FRONTEND="${DEPLOY_FRONTEND:-true}"
+          
+          if [ "$FORCE_DEPLOY" = "true" ]; then
+            echo "should_deploy_backend=$DEPLOY_BACKEND" >> $GITHUB_OUTPUT
+            echo "should_deploy_frontend=$DEPLOY_FRONTEND" >> $GITHUB_OUTPUT
+            echo "✅ Force deploy enabled - deploying based on manual inputs"
+          else
+            echo "should_deploy_backend=${{ steps.filter.outputs.backend }}" >> $GITHUB_OUTPUT
+            echo "should_deploy_frontend=${{ steps.filter.outputs.frontend }}" >> $GITHUB_OUTPUT
+            echo "✅ Using change detection for deployment"
+          fi
 
   # ============================================
   # Job 1: Deploy Infrastructure with Terraform
@@ -303,6 +344,12 @@ jobs:
           echo "function_app_url=$(terraform output -raw function_app_url)" >> $GITHUB_OUTPUT
           echo "static_web_app_name=$(terraform output -raw static_web_app_name)" >> $GITHUB_OUTPUT
           echo "resource_group=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
+          
+          echo "📋 Terraform Outputs:"
+          echo "   Function App: $(terraform output -raw function_app_name)"
+          echo "   Function URL: $(terraform output -raw function_app_url)"
+          echo "   Static Web App: $(terraform output -raw static_web_app_name)"
+          echo "   Resource Group: $(terraform output -raw resource_group_name)"
           echo "✅ Terraform outputs extracted"
 
   # ============================================
@@ -311,7 +358,7 @@ jobs:
   deploy-backend:
     name: 'Deploy Function App (Python Backend)'
     needs: [changes, infrastructure]
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.should_deploy_backend == 'true'
     runs-on: ubuntu-latest
     
     steps:
@@ -335,6 +382,42 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Configure Function App Settings
+        run: |
+          echo "🔧 Configuring Function App settings for Cosmos DB..."
+          
+          # Get Cosmos DB connection details from Terraform outputs or Azure
+          RESOURCE_GROUP="${{ needs.infrastructure.outputs.resource_group }}"
+          FUNCTION_APP="${{ needs.infrastructure.outputs.function_app_name }}"
+          
+          # Get Cosmos DB account name (adjust based on your naming convention)
+          COSMOS_ACCOUNT=$(az cosmosdb list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)
+          
+          if [ -n "$COSMOS_ACCOUNT" ]; then
+            echo "Found Cosmos DB account: $COSMOS_ACCOUNT"
+            
+            # Get Cosmos DB connection string
+            COSMOS_CONNECTION_STRING=$(az cosmosdb keys list \
+              --name "$COSMOS_ACCOUNT" \
+              --resource-group "$RESOURCE_GROUP" \
+              --type connection-strings \
+              --query "connectionStrings[0].connectionString" -o tsv)
+            
+            # Set app settings
+            az functionapp config appsettings set \
+              --name "$FUNCTION_APP" \
+              --resource-group "$RESOURCE_GROUP" \
+              --settings \
+                "COSMOS_DB_CONNECTION_STRING=$COSMOS_CONNECTION_STRING" \
+                "COSMOS_DB_DATABASE_NAME=EmployeeDB" \
+                "COSMOS_DB_CONTAINER_NAME=Employees" \
+                "PYTHON_ISOLATE_WORKER_DEPENDENCIES=1"
+            
+            echo "✅ Function App settings configured"
+          else
+            echo "⚠️ No Cosmos DB account found in resource group"
+          fi
+
       - name: Deploy Function App Code
         uses: Azure/functions-action@v1
         with:
@@ -345,16 +428,37 @@ jobs:
 
       - name: Verify Function App Deployment
         run: |
-          # Wait for function app to be ready
-          sleep 10
+          echo "⏳ Waiting for Function App to be ready..."
+          sleep 30
           
           # Test health endpoint
-          HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "${{ needs.infrastructure.outputs.function_app_url }}/api/health")
+          FUNCTION_URL="${{ needs.infrastructure.outputs.function_app_url }}"
+          echo "Testing health endpoint: $FUNCTION_URL/api/health"
           
-          if [ "$HEALTH_CHECK" = "200" ]; then
-            echo "✅ Function App is healthy"
-          else
-            echo "⚠️ Function App health check returned: $HEALTH_CHECK"
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "$FUNCTION_URL/api/health" || echo "000")
+            
+            if [ "$HEALTH_CHECK" = "200" ]; then
+              echo "✅ Function App is healthy (HTTP $HEALTH_CHECK)"
+              
+              # Test employees endpoint
+              echo "Testing employees endpoint..."
+              EMPLOYEES_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "$FUNCTION_URL/api/employees" || echo "000")
+              echo "Employees endpoint status: HTTP $EMPLOYEES_CHECK"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "⏳ Attempt $RETRY_COUNT/$MAX_RETRIES: Function App returned HTTP $HEALTH_CHECK, retrying..."
+              sleep 15
+            fi
+          done
+          
+          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+            echo "⚠️ Function App health check did not return 200 after $MAX_RETRIES attempts"
+            echo "Check Azure Portal for Function App logs"
           fi
 
   # ============================================
@@ -362,7 +466,8 @@ jobs:
   # ============================================
   deploy-frontend:
     name: 'Deploy Static Web App (React Frontend)'
-    needs: [changes, infrastructure]
+    needs: [changes, infrastructure, deploy-backend]
+    if: needs.changes.outputs.should_deploy_frontend == 'true'
     runs-on: ubuntu-latest
     
     steps:
@@ -373,7 +478,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          
 
       - name: Install Node dependencies
         working-directory: app/frontend
@@ -387,6 +491,7 @@ jobs:
           REACT_APP_API_URL: ${{ needs.infrastructure.outputs.function_app_url }}/api
           CI: false
         run: |
+          echo "🔧 Building React app with API URL: $REACT_APP_API_URL"
           npm run build
           echo "✅ Frontend built successfully"
 
@@ -405,25 +510,70 @@ jobs:
   verify-deployment:
     name: 'Verify Deployment & Output Results'
     needs: [changes, infrastructure, deploy-backend, deploy-frontend]
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    if: |
+      always() && 
+      needs.infrastructure.result == 'success' &&
+      (needs.changes.outputs.should_deploy_backend == 'true' || needs.changes.outputs.should_deploy_frontend == 'true')
     runs-on: ubuntu-latest
     
     steps:
+      - name: Azure CLI Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       - name: Test API Endpoints
         run: |
           echo "🧪 Testing API endpoints..."
           
+          FUNCTION_URL="${{ needs.infrastructure.outputs.function_app_url }}"
+          
           # Health check
-          HEALTH=$(curl -s -w "\n%{http_code}" "${{ needs.infrastructure.outputs.function_app_url }}/api/health")
+          echo "Testing: $FUNCTION_URL/api/health"
+          HEALTH=$(curl -s -w "\n%{http_code}" "$FUNCTION_URL/api/health" || echo -e "\nFailed to connect")
           HTTP_CODE=$(echo "$HEALTH" | tail -n1)
-          BODY=$(echo "$HEALTH" | head -n1)
+          BODY=$(echo "$HEALTH" | head -n -1)
           
           echo "Health Check Response: $BODY"
+          echo "HTTP Status Code: $HTTP_CODE"
           
           if [ "$HTTP_CODE" = "200" ]; then
             echo "✅ Health endpoint working"
           else
             echo "⚠️ Health endpoint returned: $HTTP_CODE"
+          fi
+          
+          # Test employees endpoint
+          echo ""
+          echo "Testing: $FUNCTION_URL/api/employees"
+          EMPLOYEES=$(curl -s -w "\n%{http_code}" "$FUNCTION_URL/api/employees" || echo -e "\nFailed to connect")
+          EMP_HTTP_CODE=$(echo "$EMPLOYEES" | tail -n1)
+          
+          echo "Employees endpoint HTTP Status: $EMP_HTTP_CODE"
+          
+          if [ "$EMP_HTTP_CODE" = "200" ]; then
+            echo "✅ Employees endpoint working"
+          else
+            echo "⚠️ Employees endpoint returned: $EMP_HTTP_CODE"
+          fi
+
+      - name: Get Static Web App URL
+        id: get-swa-url
+        run: |
+          RESOURCE_GROUP="${{ needs.infrastructure.outputs.resource_group }}"
+          SWA_NAME="${{ needs.infrastructure.outputs.static_web_app_name }}"
+          
+          echo "Getting Static Web App URL..."
+          SWA_URL=$(az staticwebapp show \
+            --name "$SWA_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "defaultHostname" -o tsv)
+          
+          if [ -n "$SWA_URL" ]; then
+            echo "static_web_app_url=https://$SWA_URL" >> $GITHUB_OUTPUT
+            echo "✅ Static Web App URL: https://$SWA_URL"
+          else
+            echo "⚠️ Could not retrieve Static Web App URL"
           fi
 
       - name: Output Deployment URLs
@@ -438,35 +588,13 @@ jobs:
           echo ""
           echo "🌐 FRONTEND (React Application):"
           echo "   Static Web App Name: ${{ needs.infrastructure.outputs.static_web_app_name }}"
+          echo "   Static Web App URL:  ${{ steps.get-swa-url.outputs.static_web_app_url }}"
           echo ""
           echo "⚙️  BACKEND (Python Function App):"
           echo "   Function App Name: ${{ needs.infrastructure.outputs.function_app_name }}"
           echo "   Function App URL:  ${{ needs.infrastructure.outputs.function_app_url }}"
           echo "   Health Endpoint:   ${{ needs.infrastructure.outputs.function_app_url }}/api/health"
           echo ""
-          echo "📊 ENDPOINTS:"
+          echo "📊 API ENDPOINTS:"
           echo "   Get Employees:     GET ${{ needs.infrastructure.outputs.function_app_url }}/api/employees"
-          echo "   Create Employee:   POST ${{ needs.infrastructure.outputs.function_app_url }}/api/employees"
-          echo "   Update Employee:   PUT ${{ needs.infrastructure.outputs.function_app_url }}/api/employees/{id}"
-          echo "   Delete Employee:   DELETE ${{ needs.infrastructure.outputs.function_app_url }}/api/employees/{id}"
-          echo ""
-          echo "📚 RESOURCES:"
-          echo "   Resource Group: ${{ needs.infrastructure.outputs.resource_group }}"
-          echo "   Region: eastus (configurable in dev.tfvars)"
-          echo ""
-          echo "🔐 SECURITY:"
-          echo "   ✅ System-Assigned Managed Identity enabled"
-          echo "   ✅ RBAC roles configured (Cosmos DB, Key Vault, Storage)"
-          echo "   ✅ VNet Integration enabled"
-          echo "   ✅ Private Endpoints configured"
-          echo "   ✅ HTTPS-only enforcement"
-          echo ""
-          echo "📝 NEXT STEPS:"
-          echo "   1. Wait 2-3 minutes for Static Web App to fully provision"
-          echo "   2. Visit the Static Web App URL to access the frontend"
-          echo "   3. Test the Employee Management APIs"
-          echo "   4. Check Azure Portal for resource details"
-          echo ""
-          echo "────────────────────────────────────────────────────────────"
-          echo "Deploy Time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          echo "────────────────────────────────────────────────────────────"
+          echo "   Create Employee
