@@ -52,6 +52,24 @@ def get_container():
     database = client.get_database_client(database_name)
     return database.get_container_client(container_name)
 
+def create_cors_response(body, status_code=200, headers=None):
+    """Create HTTP response with CORS headers"""
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Accept, Origin",
+        "Access-Control-Max-Age": "86400"
+    }
+    if headers:
+        cors_headers.update(headers)
+    
+    return func.HttpResponse(
+        body=body,
+        status_code=status_code,
+        headers=cors_headers,
+        mimetype="application/json"
+    )
+
 
 # ============================================================================
 # Health Check
@@ -111,6 +129,19 @@ def diagnostics(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
+# OPTIONS handler for CORS preflight requests
+# ============================================================================
+@app.route(route="employees", methods=["OPTIONS"])
+def options_employees(req: func.HttpRequest) -> func.HttpResponse:
+    """Handle CORS preflight requests"""
+    return create_cors_response("", status_code=200)
+
+@app.route(route="employees/{id}", methods=["OPTIONS"])  
+def options_employee(req: func.HttpRequest) -> func.HttpResponse:
+    """Handle CORS preflight requests for single employee"""
+    return create_cors_response("", status_code=200)
+
+# ============================================================================
 # GET /api/employees - List all employees
 # ============================================================================
 @app.route(route="employees", methods=["GET"])
@@ -135,16 +166,14 @@ def get_employees(req: func.HttpRequest) -> func.HttpResponse:
         else:
             items = list(container.read_all_items())
         
-        return func.HttpResponse(
+        return create_cors_response(
             json.dumps({"employees": items, "count": len(items)}),
-            mimetype="application/json",
             status_code=200
         )
     except Exception as e:
         logging.error(f"Error getting employees: {str(e)}")
-        return func.HttpResponse(
+        return create_cors_response(
             json.dumps({"error": str(e)}),
-            mimetype="application/json",
             status_code=500
         )
 
@@ -165,22 +194,19 @@ def get_employee(req: func.HttpRequest) -> func.HttpResponse:
         items = list(container.query_items(query=query, parameters=parameters, enable_cross_partition_query=True))
         
         if not items:
-            return func.HttpResponse(
+            return create_cors_response(
                 json.dumps({"error": "Employee not found"}),
-                mimetype="application/json",
                 status_code=404
             )
         
-        return func.HttpResponse(
+        return create_cors_response(
             json.dumps(items[0]),
-            mimetype="application/json",
             status_code=200
         )
     except Exception as e:
         logging.error(f"Error getting employee: {str(e)}")
-        return func.HttpResponse(
+        return create_cors_response(
             json.dumps({"error": str(e)}),
-            mimetype="application/json",
             status_code=500
         )
 
