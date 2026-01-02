@@ -46,19 +46,19 @@ resource "azurerm_private_endpoint" "key_vault" {
   tags = var.tags
 }
 
-# Diagnostic Settings
-resource "azurerm_monitor_diagnostic_setting" "key_vault" {
-  count = var.enable_diagnostics ? 1 : 0
+# # Diagnostic Settings
+# resource "azurerm_monitor_diagnostic_setting" "key_vault" {
+#   count = var.enable_diagnostics ? 1 : 0
 
-  name                       = "diag-${var.name}"
-  target_resource_id         = azurerm_key_vault.main.id
-  log_analytics_workspace_id = var.log_analytics_workspace_id
+#   name                       = "diag-${var.name}"
+#   target_resource_id         = azurerm_key_vault.main.id
+#   log_analytics_workspace_id = var.log_analytics_workspace_id
 
-  enabled_log {
-    category = "AuditEvent"
-  }
+#   enabled_log {
+#     category = "AuditEvent"
+#   }
 
-  enabled_metric {
-    category = "AllMetrics"
-  }
-}
+#   enabled_metric {
+#     category = "AllMetrics"
+#   }
+# }

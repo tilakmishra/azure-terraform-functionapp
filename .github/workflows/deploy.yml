@@ -5,6 +5,31 @@ on:
   # push:
   #   branches: [main]
   workflow_dispatch:  # Manual trigger only
+    inputs:
+      deploy_infrastructure:
+        description: 'Deploy/Update Terraform Infrastructure?'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      deploy_backend:
+        description: 'Deploy Python Function App (Backend)?'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      deploy_frontend:
+        description: 'Deploy React Static Web App (Frontend)?'
+        required: true
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 env:
   AZURE_FUNCTIONAPP_PACKAGE_PATH: 'app/backend'
@@ -75,6 +100,7 @@ jobs:
   # ============================================
   infrastructure:
     name: 'Terraform Infrastructure'
+    if: github.event.inputs.deploy_infrastructure == 'true'
     runs-on: ubuntu-latest
     outputs:
       function_app_name: ${{ steps.terraform-output.outputs.function_app_name }}
@@ -306,14 +332,51 @@ jobs:
           echo "✅ Terraform outputs extracted"
 
   # ============================================
+  # Job 1b: Fetch Existing Infrastructure (if skipping Terraform)
+  # ============================================
+  fetch-infrastructure:
+    name: 'Fetch Existing Infrastructure'
+    if: github.event.inputs.deploy_infrastructure == 'false'
+    runs-on: ubuntu-latest
+    outputs:
+      function_app_name: ${{ steps.fetch-outputs.outputs.function_app_name }}
+      function_app_url: ${{ steps.fetch-outputs.outputs.function_app_url }}
+      static_web_app_name: ${{ steps.fetch-outputs.outputs.static_web_app_name }}
+      resource_group: ${{ steps.fetch-outputs.outputs.resource_group }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Fetch Infrastructure Details
+        id: fetch-outputs
+        run: |
+          # Read values from dev.tfvars
+          RESOURCE_GROUP=$(grep 'resource_group_name' dev.tfvars | cut -d'=' -f2 | tr -d ' "')
+          FUNCTION_APP=$(grep 'function_app_name' dev.tfvars | cut -d'=' -f2 | tr -d ' "')
+          STATIC_WEB_APP=$(grep 'static_web_app_name' dev.tfvars | cut -d'=' -f2 | tr -d ' "')
+          
+          # Get Function App URL from Azure
+          FUNCTION_APP_URL="https://$(az functionapp show --resource-group $RESOURCE_GROUP --name $FUNCTION_APP --query defaultHostName -o tsv)"
+          
+          echo "function_app_name=$FUNCTION_APP" >> $GITHUB_OUTPUT
+          echo "function_app_url=$FUNCTION_APP_URL" >> $GITHUB_OUTPUT
+          echo "static_web_app_name=$STATIC_WEB_APP" >> $GITHUB_OUTPUT
+          echo "resource_group=$RESOURCE_GROUP" >> $GITHUB_OUTPUT
+          echo "✅ Existing infrastructure details fetched"
+
+  # ============================================
   # Job 2: Deploy Function App (Backend)
   # ============================================
   deploy-backend:
     name: 'Deploy Function App (Python Backend)'
-    needs: [changes, infrastructure]
-    if: needs.changes.outputs.backend == 'true'
+    if: github.event.inputs.deploy_backend == 'true'
+    needs: [changes, infrastructure, fetch-infrastructure]
     runs-on: ubuntu-latest
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -338,7 +401,7 @@ jobs:
       - name: Deploy Function App Code
         uses: Azure/functions-action@v1
         with:
-          app-name: ${{ needs.infrastructure.outputs.function_app_name }}
+          app-name: ${{ (github.event.inputs.deploy_infrastructure == 'true' && needs.infrastructure.outputs.function_app_name) || needs.fetch-infrastructure.outputs.function_app_name }}
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
           scm-do-build-during-deployment: true
           enable-oryx-build: true
@@ -349,7 +412,8 @@ jobs:
           sleep 10
           
           # Test health endpoint
-          HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "${{ needs.infrastructure.outputs.function_app_url }}/api/health")
+          FUNCTION_APP_URL="${{ (github.event.inputs.deploy_infrastructure == 'true' && needs.infrastructure.outputs.function_app_url) || needs.fetch-infrastructure.outputs.function_app_url }}"
+          HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "$FUNCTION_APP_URL/api/health")
           
           if [ "$HEALTH_CHECK" = "200" ]; then
             echo "✅ Function App is healthy"
@@ -362,7 +426,8 @@ jobs:
   # ============================================
   deploy-frontend:
     name: 'Deploy Static Web App (React Frontend)'
-    needs: [changes, infrastructure]
+    if: github.event.inputs.deploy_frontend == 'true'
+    needs: [changes, infrastructure, fetch-infrastructure]
     runs-on: ubuntu-latest
     
     steps:
@@ -384,7 +449,7 @@ jobs:
       - name: Build React Frontend
         working-directory: app/frontend
         env:
-          REACT_APP_API_URL: ${{ needs.infrastructure.outputs.function_app_url }}/api
+          REACT_APP_API_URL: ${{ (github.event.inputs.deploy_infrastructure == 'true' && needs.infrastructure.outputs.function_app_url) || needs.fetch-infrastructure.outputs.function_app_url }}/api
           CI: false
         run: |
           npm run build
@@ -404,17 +469,22 @@ jobs:
   # ============================================
   verify-deployment:
     name: 'Verify Deployment & Output Results'
-    needs: [changes, infrastructure, deploy-backend, deploy-frontend]
-    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
+    if: |
+      always() &&
+      (github.event.inputs.deploy_backend == 'true' || github.event.inputs.deploy_frontend == 'true')
+    needs: [changes, infrastructure, fetch-infrastructure, deploy-backend, deploy-frontend]
     runs-on: ubuntu-latest
     
     steps:
       - name: Test API Endpoints
+        if: github.event.inputs.deploy_backend == 'true'
         run: |
           echo "🧪 Testing API endpoints..."
           
+          FUNCTION_APP_URL="${{ (github.event.inputs.deploy_infrastructure == 'true' && needs.infrastructure.outputs.function_app_url) || needs.fetch-infrastructure.outputs.function_app_url }}"
+          
           # Health check
-          HEALTH=$(curl -s -w "\n%{http_code}" "${{ needs.infrastructure.outputs.function_app_url }}/api/health")
+          HEALTH=$(curl -s -w "\n%{http_code}" "$FUNCTION_APP_URL/api/health")
           HTTP_CODE=$(echo "$HEALTH" | tail -n1)
           BODY=$(echo "$HEALTH" | head -n1)
           
@@ -426,7 +496,7 @@ jobs:
             echo "⚠️ Health endpoint returned: $HTTP_CODE"
           fi
 
-      - name: Output Deployment URLs
+      - name: Output Deployment Summary
         run: |
           echo ""
           echo "╔═════════════════════════════════════════════════════════════╗"
@@ -436,37 +506,18 @@ jobs:
           echo "📋 Deployment Summary:"
           echo "────────────────────────────────────────────────────────────"
           echo ""
-          echo "🌐 FRONTEND (React Application):"
-          echo "   Static Web App Name: ${{ needs.infrastructure.outputs.static_web_app_name }}"
-          echo ""
-          echo "⚙️  BACKEND (Python Function App):"
-          echo "   Function App Name: ${{ needs.infrastructure.outputs.function_app_name }}"
-          echo "   Function App URL:  ${{ needs.infrastructure.outputs.function_app_url }}"
-          echo "   Health Endpoint:   ${{ needs.infrastructure.outputs.function_app_url }}/api/health"
-          echo ""
-          echo "📊 ENDPOINTS:"
-          echo "   Get Employees:     GET ${{ needs.infrastructure.outputs.function_app_url }}/api/employees"
-          echo "   Create Employee:   POST ${{ needs.infrastructure.outputs.function_app_url }}/api/employees"
-          echo "   Update Employee:   PUT ${{ needs.infrastructure.outputs.function_app_url }}/api/employees/{id}"
-          echo "   Delete Employee:   DELETE ${{ needs.infrastructure.outputs.function_app_url }}/api/employees/{id}"
-          echo ""
-          echo "📚 RESOURCES:"
-          echo "   Resource Group: ${{ needs.infrastructure.outputs.resource_group }}"
-          echo "   Region: eastus (configurable in dev.tfvars)"
-          echo ""
-          echo "🔐 SECURITY:"
-          echo "   ✅ System-Assigned Managed Identity enabled"
-          echo "   ✅ RBAC roles configured (Cosmos DB, Key Vault, Storage)"
-          echo "   ✅ VNet Integration enabled"
-          echo "   ✅ Private Endpoints configured"
-          echo "   ✅ HTTPS-only enforcement"
-          echo ""
-          echo "📝 NEXT STEPS:"
-          echo "   1. Wait 2-3 minutes for Static Web App to fully provision"
-          echo "   2. Visit the Static Web App URL to access the frontend"
-          echo "   3. Test the Employee Management APIs"
-          echo "   4. Check Azure Portal for resource details"
-          echo ""
+          if [ "${{ github.event.inputs.deploy_frontend }}" = "true" ]; then
+            echo "🌐 FRONTEND (React Application):"
+            echo "   Static Web App Name: ${{ (github.event.inputs.deploy_infrastructure == 'true' && needs.infrastructure.outputs.static_web_app_name) || needs.fetch-infrastructure.outputs.static_web_app_name }}"
+            echo ""
+          fi
+          if [ "${{ github.event.inputs.deploy_backend }}" = "true" ]; then
+            echo "⚙️  BACKEND (Python Function App):"
+            echo "   Function App Name: ${{ (github.event.inputs.deploy_infrastructure == 'true' && needs.infrastructure.outputs.function_app_name) || needs.fetch-infrastructure.outputs.function_app_name }}"
+            echo "   Function App URL:  ${{ (github.event.inputs.deploy_infrastructure == 'true' && needs.infrastructure.outputs.function_app_url) || needs.fetch-infrastructure.outputs.function_app_url }}"
+            echo "   Health Endpoint:   ${{ (github.event.inputs.deploy_infrastructure == 'true' && needs.infrastructure.outputs.function_app_url) || needs.fetch-infrastructure.outputs.function_app_url }}/api/health"
+            echo ""
+          fi
           echo "────────────────────────────────────────────────────────────"
           echo "Deploy Time: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           echo "────────────────────────────────────────────────────────────"
