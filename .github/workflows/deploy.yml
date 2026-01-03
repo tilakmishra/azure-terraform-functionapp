@@ -6,6 +6,9 @@ on:
 env:
   TERRAFORM_VERSION: '1.5.0'
   PYTHON_VERSION: '3.11'
+  TFLINT_VERSION: '0.51.1'
+  TFSEC_VERSION: '1.28.1'
+  TERRAFORM_DOCS_VERSION: '0.17.0'
 
 jobs:
   pre-commit:
@@ -25,6 +28,20 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
+
+      - name: Install tflint, tfsec, terraform-docs
+        run: |
+          set -e
+          curl -sL "https://github.com/terraform-linters/tflint/releases/download/v${{ env.TFLINT_VERSION }}/tflint_linux_amd64.zip" -o /tmp/tflint.zip
+          unzip -o /tmp/tflint.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/tflint
+
+          curl -sL "https://github.com/aquasecurity/tfsec/releases/download/v${{ env.TFSEC_VERSION }}/tfsec-linux-amd64" -o /usr/local/bin/tfsec
+          chmod +x /usr/local/bin/tfsec
+
+          curl -sL "https://github.com/terraform-docs/terraform-docs/releases/download/v${{ env.TERRAFORM_DOCS_VERSION }}/terraform-docs-v${{ env.TERRAFORM_DOCS_VERSION }}-linux-amd64.tar.gz" -o /tmp/terraform-docs.tar.gz
+          tar -xzf /tmp/terraform-docs.tar.gz -C /usr/local/bin terraform-docs
+          chmod +x /usr/local/bin/terraform-docs
 
       - name: Install pre-commit
         run: |

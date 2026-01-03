@@ -17,7 +17,7 @@ cost_center = "IT"
 vnet_address_space = ["10.0.0.0/16"]
 
 # Cosmos DB
-cosmos_db_throughput = 400  # Minimum for dev
+cosmos_db_throughput = 400 # Minimum for dev
 
 # Function App
 function_app_runtime         = "python"
