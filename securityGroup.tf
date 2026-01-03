@@ -6,7 +6,7 @@ module "securitygroup" {
   environment         = var.environment
   resource_group_name = module.resource_group.name
   tags                = local.common_tags
-  
+
   subnet_configs = {
     function_app = {
       address_prefixes  = ["10.0.1.0/24"]
@@ -25,7 +25,7 @@ module "securitygroup" {
       service_endpoints = ["Microsoft.AzureCosmosDB", "Microsoft.KeyVault", "Microsoft.Storage"]
     }
   }
-  
+
   subnet_ids = module.virtualsubnet.subnet_ids
 
   depends_on = [module.virtualsubnet]

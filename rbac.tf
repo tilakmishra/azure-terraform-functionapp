@@ -38,9 +38,9 @@ resource "azurerm_role_assignment" "function_app_keyvault_access" {
 # Grant Function App managed identity to read from storage (for function code & files)
 # Role: "Storage Blob Data Reader" - allows reading blob data required for function runtime
 resource "azurerm_role_assignment" "function_app_storage_blob_read" {
-  scope              = module.function_app.storage_account_id
+  scope                = module.function_app.storage_account_id
   role_definition_name = "Storage Blob Data Reader"
-  principal_id       = module.function_app.identity_principal_id
+  principal_id         = module.function_app.identity_principal_id
 
   depends_on = [module.function_app]
 }
@@ -48,9 +48,9 @@ resource "azurerm_role_assignment" "function_app_storage_blob_read" {
 # Grant Function App managed identity to write to storage logs/diagnostics
 # Role: "Storage Queue Data Contributor" - allows writing to queue/monitoring data
 resource "azurerm_role_assignment" "function_app_storage_queue_contributor" {
-  scope              = module.function_app.storage_account_id
+  scope                = module.function_app.storage_account_id
   role_definition_name = "Storage Queue Data Contributor"
-  principal_id       = module.function_app.identity_principal_id
+  principal_id         = module.function_app.identity_principal_id
 
   depends_on = [module.function_app]
 }
