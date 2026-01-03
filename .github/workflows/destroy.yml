@@ -1,0 +1,129 @@
+name: Destroy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm infrastructure deletion'
+        required: true
+        type: string
+
+env:
+  TERRAFORM_VERSION: '1.5.0'
+
+jobs:
+  validate-input:
+    name: 'Validate Destroy Confirmation'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        run: |
+          if [ "${{ inputs.confirm_destroy }}" != "DESTROY" ]; then
+            echo "❌ Destroy not confirmed. You must type 'DESTROY' exactly."
+            exit 1
+          fi
+          echo "✅ Destroy confirmed"
+
+  terraform-destroy-plan:
+    name: 'Terraform Destroy Plan'
+    needs: validate-input
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set Terraform Service Principal Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientId')" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientSecret')" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.tenantId')" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.subscriptionId')" >> $GITHUB_ENV
+
+      - name: Terraform Init
+        working-directory: .
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=rg-terraform-state" \
+            -backend-config="storage_account_name=tfstateemp" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=terraform.tfstate"
+
+      - name: Terraform Destroy Plan
+        working-directory: .
+        run: |
+          terraform plan -destroy -var-file="dev.tfvars" -out=destroy.tfplan
+          echo "⚠️ Review the destroy plan above carefully"
+
+      - name: Upload Destroy Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: destroy-tfplan
+          path: destroy.tfplan
+
+  terraform-destroy:
+    name: 'Terraform Destroy (approval required)'
+    needs: terraform-destroy-plan
+    runs-on: ubuntu-latest
+    environment: tf-destroy
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set Terraform Service Principal Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientId')" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientSecret')" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.tenantId')" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.subscriptionId')" >> $GITHUB_ENV
+
+      - name: Download Destroy Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: destroy-tfplan
+          path: .
+
+      - name: Terraform Init
+        working-directory: .
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=rg-terraform-state" \
+            -backend-config="storage_account_name=tfstateemp" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=terraform.tfstate"
+
+      - name: Terraform Destroy
+        working-directory: .
+        run: |
+          terraform apply -auto-approve destroy.tfplan
+          echo "🗑️ Infrastructure destroyed"
+
+      - name: Cleanup confirmation
+        run: |
+          echo "╔═════════════════════════════════════════════════════════════╗"
+          echo "║            ⚠️  INFRASTRUCTURE DESTROYED ⚠️                 ║"
+          echo "╚═════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "All resources have been removed from Azure."
+          echo "The Terraform state has been updated."
