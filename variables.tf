@@ -48,9 +48,36 @@ variable "tags" {
 # Networking (VNet always enabled for enterprise security)
 # ─────────────────────────────────────────────────────────────────────────────
 variable "vnet_address_space" {
-  description = "Virtual Network address space"
+  description = "Virtual Network address space (CIDR blocks). Use different ranges per environment to avoid collisions (Dev: 10.0.0.0/16, Stg: 10.1.0.0/16, Prod: 10.2.0.0/16)"
   type        = list(string)
-  default     = ["10.0.0.0/16"]
+  nullable    = false
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Subnet CIDR Blocks - Environment-Specific
+# ─────────────────────────────────────────────────────────────────────────────
+variable "subnet_function_app_cidr" {
+  description = "CIDR block for Function App VNet integration subnet (e.g., 10.0.1.0/24 for dev, 10.1.1.0/24 for stg, 10.2.1.0/24 for prod)"
+  type        = string
+  nullable    = false
+}
+
+variable "subnet_app_service_cidr" {
+  description = "CIDR block for App Service subnet (e.g., 10.0.2.0/24 for dev, 10.1.2.0/24 for stg, 10.2.2.0/24 for prod)"
+  type        = string
+  nullable    = false
+}
+
+variable "subnet_private_endpoints_cidr" {
+  description = "CIDR block for Private Endpoints subnet (e.g., 10.0.3.0/24 for dev, 10.1.3.0/24 for stg, 10.2.3.0/24 for prod)"
+  type        = string
+  nullable    = false
+}
+
+variable "subnet_data_cidr" {
+  description = "CIDR block for Data subnet (e.g., 10.0.4.0/24 for dev, 10.1.4.0/24 for stg, 10.2.4.0/24 for prod)"
+  type        = string
+  nullable    = false
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

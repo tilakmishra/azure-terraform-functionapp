@@ -1,210 +1,136 @@
-# DTE Employee Management Application - Infrastructure as Code
+# Employee Management Infrastructure
 
-## 📘 Overview
+Modern, secure Azure infrastructure for employee management application deployed via **GitHub Actions with OIDC authentication**.
 
-This Terraform project provisions a **production-ready, enterprise-grade Azure infrastructure** for the DTE Employee Management web application. The architecture follows Azure best practices with VNet isolation, private endpoints, managed identities, and comprehensive monitoring.
+## 🎯 Quick Start
 
-### Architecture Components
+### Prerequisites
+- Azure subscription
+- GitHub repository
+- Azure CLI installed
 
-- **Frontend**: Azure Static Web App for React/Vue/Angular applications
-- **Backend**: Azure Function App (Python 3.11) for serverless API
-- **Database**: Azure Cosmos DB (SQL API) with private endpoint
-- **Security**: Azure Key Vault for secrets, RBAC-based access control
-- **Networking**: Virtual Network with isolated subnets and NSGs
-- **Monitoring**: Log Analytics Workspace + Application Insights
-- **DNS**: Private DNS Zones for secure private endpoint resolution
+### Setup (One-time)
+
+```bash
+# 1. Run OIDC setup script
+./scripts/setup-github-oidc.sh \
+  --github-org YOUR_ORG \
+  --github-repo YOUR_REPO \
+  --azure-subscription YOUR_SUBSCRIPTION_ID
+
+# 2. Add GitHub Secrets (from script output)
+# Repository Settings → Secrets → Actions → New repository secret
+#   AZURE_CLIENT_ID
+#   AZURE_TENANT_ID  
+#   AZURE_SUBSCRIPTION_ID
+
+# 3. Deploy via GitHub Actions
+# Push to main branch or manually trigger workflow
+```
 
 ---
 
 ## ✅ Features
 
-- **Zero-Trust Networking**: All resources deployed within VNet with private endpoints
-- **Secure by Default**: Public network access disabled, HTTPS-only, RBAC-enabled
-- **High Availability**: Zone-redundant infrastructure components
-- **Comprehensive Monitoring**: Centralized logging and application performance monitoring
-- **Enterprise Compliance**: Meets security standards with pre-commit hooks (tflint, tfsec, terraform-docs)
-- **Infrastructure as Code**: Fully automated deployment with GitHub Actions workflows
-- **Environment Isolation**: Separate configurations for dev, staging, and production
+- **🔒 Secure Authentication**: GitHub OIDC (no long-lived credentials stored)
+- **🏗️ Modular Architecture**: 11 reusable Terraform modules
+- **🌍 Multi-Environment**: dev, stg, prod with isolated configurations
+- **📊 Monitoring**: Application Insights + Log Analytics
+- **🔐 Zero-Trust Networking**: VNet isolation with private endpoints
+- **✨ Best Practices**: Underscore naming, organized variables, pre-commit hooks
 
 ---
 
-## 🏗️ Architecture Diagram
+## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Azure Cloud                              │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              Virtual Network (10.0.0.0/16)               │  │
-│  │                                                          │  │
-│  │  ┌────────────────┐  ┌────────────────┐  ┌───────────┐ │  │
-│  │  │ Function App   │  │ Private        │  │   Data    │ │  │
-│  │  │ Subnet         │  │ Endpoints      │  │  Subnet   │ │  │
-│  │  │ (10.0.1.0/24)  │  │ (10.0.3.0/24)  │  │(10.0.4.0/24)│ │
-│  │  └────────────────┘  └────────────────┘  └───────────┘ │  │
-│  │         │                    │                  │        │  │
-│  │         ▼                    ▼                  ▼        │  │
-│  │  ┌────────────────┐  ┌────────────────┐  ┌───────────┐ │  │
-│  │  │ Function App   │  │ Key Vault PE   │  │ Cosmos DB │ │  │
-│  │  │ (VNet Integ.)  │  │ Cosmos DB PE   │  │ (Private) │ │  │
-│  │  └────────────────┘  │ Storage PE     │  └───────────┘ │  │
-│  │                      └────────────────┘                 │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  ┌──────────────────┐   ┌──────────────────┐                  │
-│  │ Static Web App   │   │ App Insights +   │                  │
-│  │ (Public)         │───│ Log Analytics    │                  │
-│  └──────────────────┘   └──────────────────┘                  │
-│           │                                                    │
-│           ▼                                                    │
-│  ┌──────────────────┐                                         │
-│  │ Function App API │ (HTTPS)                                 │
-│  │ (Backend)        │                                         │
-│  └──────────────────┘                                         │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    Azure Infrastructure                 │
+│                                                         │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │       Virtual Network (10.0.0.0/16)              │  │
+│  │                                                  │  │
+│  │  ┌──────────────┐  ┌──────────────┐            │  │
+│  │  │ Function App │  │  Cosmos DB   │            │  │
+│  │  │   Subnet     │  │   (Private   │            │  │
+│  │  │ (10.0.1.0/24)│  │  Endpoint)   │            │  │
+│  │  └──────────────┘  └──────────────┘            │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                         │
+│  ┌──────────────┐   ┌──────────────┐                  │
+│  │ Static Web   │   │ Monitoring:  │                  │
+│  │ App (Public) │───│ App Insights │                  │
+│  └──────────────┘   │ + Analytics  │                  │
+│                     └──────────────┘                  │
+└─────────────────────────────────────────────────────────┘
 
-Data Flow:
-1. User → Static Web App → Function App API
-2. Function App → Private Endpoint → Cosmos DB
-3. Function App → Private Endpoint → Key Vault (Secrets)
-4. All services → Log Analytics Workspace (Logs/Metrics)
+Deployment: GitHub Actions → OIDC Token → Azure → Terraform
 ```
+
+## 📦 Resources Deployed
+
+| Resource | Purpose |
+|----------|---------|
+| Virtual Network | Network isolation |
+| Subnets (3) | Function App, Private Endpoints, Data |
+| Network Security Groups | Firewall rules |
+| Cosmos DB | NoSQL database with private endpoint |
+| Function App | Backend API (Python 3.11) |
+| App Service Plan | Elastic Premium EP1 |
+| Storage Account | Function App storage |
+| Static Web App | Frontend hosting |
+| Log Analytics | Centralized logging |
+| Application Insights | APM monitoring |
+| Key Vault | Secrets management |
+| Private Endpoints | Secure private connectivity |
+
+**Estimated Cost**: Dev ~$150/mo, Prod ~$500/mo
 
 ---
 
-## ⚠️ Requirements
+## 🚀 Deployment
 
-### Tools & Versions
+### GitHub Actions (Recommended)
 
-- **Terraform**: >= 1.5.0
-- **Azure CLI**: >= 2.50.0
-- **Python**: 3.11+ (for Function App development)
-- **Git**: For version control
-- **Pre-commit**: For code quality checks
+**Authentication**: Uses GitHub OIDC - no secrets stored in GitHub!
 
-### Azure Prerequisites
+1. **Initial Setup** (once):
+   ```bash
+   ./scripts/setup-github-oidc.sh \
+     --github-org mycompany \
+     --github-repo employee-management \
+     --azure-subscription xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+   ```
 
-- Active Azure Subscription with sufficient quota
-- Azure AD permissions to create service principals
-- Resource Provider registrations:
-  - `Microsoft.Web`
-  - `Microsoft.DocumentDB`
-  - `Microsoft.KeyVault`
-  - `Microsoft.Network`
-  - `Microsoft.Storage`
-  - `Microsoft.Insights`
+2. **Add GitHub Secrets** (from script output):
+   - `AZURE_CLIENT_ID`
+   - `AZURE_TENANT_ID`
+   - `AZURE_SUBSCRIPTION_ID`
 
-### Local Development Tools (Optional but Recommended)
+3. **Deploy**:
+   ```bash
+   # Trigger via push
+   git push origin main
+   
+   # Or manually via GitHub CLI
+   gh workflow run deploy-oidc.yml -f environment=dev
+   ```
 
-```bash
-# Install pre-commit hooks
-pip install pre-commit
-
-# Install security scanning tools
-choco install tflint tfsec terraform-docs  # Windows
-brew install tflint tfsec terraform-docs    # macOS
-```
-
----
-
-## 📦 Resources Created
-
-| Resource Type | Count | Purpose |
-|---------------|-------|---------|
-| Resource Group | 1 | Container for all resources |
-| Virtual Network | 1 | Network isolation (10.0.0.0/16) |
-| Subnets | 3 | Function App, Private Endpoints, Data |
-| Network Security Groups | 3 | Subnet-level firewall rules |
-| Log Analytics Workspace | 1 | Centralized logging |
-| Application Insights | 1 | APM and monitoring |
-| Key Vault | 1 | Secrets management |
-| Cosmos DB Account | 1 | NoSQL database |
-| Cosmos DB SQL Database | 1 | Employee data |
-| Cosmos DB Container | 1 | Employee collection |
-| Function App | 1 | Backend API (Python 3.11) |
-| App Service Plan | 1 | Elastic Premium EP1 |
-| Storage Account | 1 | Function App content |
-| Static Web App | 1 | Frontend hosting |
-| Private Endpoints | 5 | Key Vault, Cosmos DB, Storage (Blob, File) |
-| Private DNS Zones | 1+ | privatelink.documents.azure.com |
-| RBAC Role Assignments | 4+ | Managed identity permissions |
-
-**Total Estimated Monthly Cost (Dev)**: ~$150-200 USD  
-**Total Estimated Monthly Cost (Prod)**: ~$500-800 USD
-
----
-
-## 🚀 Quick Start
-
-### 1. Clone Repository
-
-```bash
-git clone <repository-url>
-cd azure/DTE/terraform
-```
-
-### 2. Configure Azure Authentication
+### Local Deployment (Testing)
 
 ```bash
 # Login to Azure
 az login
+az account set --subscription "YOUR_SUBSCRIPTION_ID"
 
-# Set subscription
-az account set --subscription "<subscription-id>"
-
-# Create service principal for Terraform (optional for local)
-az ad sp create-for-rbac --name "terraform-dte-sp" \
-  --role="Contributor" \
-  --scopes="/subscriptions/<subscription-id>"
-```
-
-### 3. Initialize Terraform Backend
-
-```bash
-# Edit backend.tf with your storage account details
-# Then initialize
+# Initialize Terraform
 terraform init
-```
 
-### 4. Configure Environment Variables
-
-```bash
-# Copy example tfvars
-cp dev.tfvars terraform.tfvars
-
-# Edit terraform.tfvars with your values
-# Key variables:
-# - environment: dev/stg/prod
-# - project_name: emp (or your project code)
-# - azure_region: eastus2 (or your preferred region)
-```
-
-### 5. Deploy Infrastructure
-
-```bash
-# Validate configuration
-terraform validate
-
-# Preview changes
-terraform plan -var-file="dev.tfvars"
+# Plan deployment
+terraform plan -var-file="environments/dev.tfvars"
 
 # Apply changes
-terraform apply -var-file="dev.tfvars"
-
-# Save outputs
-terraform output > outputs.txt
-```
-
-### 6. Deploy Application Code
-
-After infrastructure is ready, use the GitHub Actions workflow:
-
-```bash
-# Push code to trigger deployment
-git push origin main
-
-# Or manually trigger workflow in GitHub UI:
-# Actions → Deploy Infrastructure and Application → Run workflow
+terraform apply -var-file="environments/dev.tfvars"
 ```
 
 ---
@@ -213,79 +139,109 @@ git push origin main
 
 ```
 terraform/
-├── .github/
-│   └── workflows/
-│       ├── deploy.yml           # Infrastructure deployment workflow
-│       ├── destroy.yml          # Infrastructure destruction workflow
-│       └── deploy-app-only.yml  # Application-only deployment
+├── .github/workflows/
+│   └── deploy-oidc.yml         # GitHub Actions with OIDC auth
 ├── app/
-│   ├── backend/                 # Python Function App code
-│   └── frontend/                # Static Web App code
-├── modules/                     # Reusable Terraform modules
-│   ├── app_insights/           # Application Insights module
-│   ├── cosmos_db/              # Cosmos DB with private endpoint
-│   ├── function_app/           # Function App with VNet integration
-│   ├── key_vault/              # Key Vault with RBAC
-│   ├── log_analytics/          # Log Analytics Workspace
-│   ├── private_dns_zone/       # Private DNS Zone management
-│   ├── resource_group/         # Resource Group
-│   ├── securitygroup/          # Network Security Groups
-│   ├── static_web_app/         # Static Web App
-│   ├── virtualnetwork/         # Virtual Network
-│   └── virtualsubnet/          # Subnet configurations
-├── scripts/                     # Deployment helper scripts
-│   └── seed-data.sh            # Cosmos DB data seeding
-├── appInsights.tf              # Application Insights config
-├── backend.tf                  # Terraform remote backend
-├── cosmosDb.tf                 # Cosmos DB deployment
-├── data.tf                     # Data sources
-├── dev.tfvars                  # Development environment
-├── functionApp.tf              # Function App configuration
-├── keyVault.tf                 # Key Vault deployment
-├── locals.tf                   # Local values and naming
-├── logAnalytics.tf             # Log Analytics workspace
-├── main.tf                     # Main entry point (documentation)
-├── outputs.tf                  # Output values
-├── prod.tfvars                 # Production environment
-├── provider.tf                 # Azure provider config
-├── rbac.tf                     # RBAC role assignments
-├── resourceGroup.tf            # Resource Group module
-├── securityGroup.tf            # NSG rules
-├── staticWebApp.tf             # Static Web App
-├── variables.tf                # Input variable definitions
-├── versions.tf                 # Provider version constraints
-├── virtualNetwork.tf           # VNet deployment
-├── virtualSubnet.tf            # Subnet configurations
-├── .pre-commit-config.yaml     # Pre-commit hooks config
-└── README.md                   # This file
+│   ├── backend/                # Function App code
+│   └── frontend/               # Static Web App code
+├── environments/
+│   ├── common.tfvars           # Shared configuration
+│   ├── dev.tfvars              # Development overrides
+│   ├── stg.tfvars              # Staging overrides
+│   └── prod.tfvars             # Production overrides
+├── modules/                    # 11 Reusable modules
+│   ├── app_insights/
+│   ├── cosmos_db/
+│   ├── function_app/
+│   ├── key_vault/
+│   ├── log_analytics/
+│   ├── private_dns_zone/
+│   ├── resource_group/
+│   ├── security_group/
+│   ├── static_web_app/
+│   ├── virtual_network/
+│   └── virtual_subnet/
+├── scripts/
+│   └── setup-github-oidc.sh   # OIDC setup automation
+├── backend.tf                 # Terraform state backend
+├── data.tf                    # Data sources
+├── locals.tf                  # Naming conventions
+├── main.tf                    # Module orchestration
+├── outputs.tf                 # Output values
+├── provider.tf                # Azure provider
+├── variables.tf               # Input variables
+├── versions.tf                # Version constraints
+└── README.md                  # This file
 ```
+
+**Key Best Practices Implemented**:
+- ✅ **Underscore naming** (`rg_emp_dev` not `rg-emp-dev`)
+- ✅ **Centralized orchestration** (all modules in `main.tf`)
+- ✅ **Environment-based configs** (`environments/` folder)
+- ✅ **Pre-commit hooks** (tflint, tfsec validation)
+- ✅ **OIDC authentication** (no stored credentials)
 
 ---
 
-## 🧩 Input Variables
+## 🔧 Configuration
 
-See [variables.tf](variables.tf) for complete list. Key variables:
+### Environment Variables
 
-| Variable | Description | Type | Default | Required |
-|----------|-------------|------|---------|----------|
-| `environment` | Environment name (dev/stg/prod) | string | - | ✅ |
-| `project_name` | Project name for resource naming | string | - | ✅ |
-| `azure_region` | Azure region for deployment | string | `eastus2` | ❌ |
-| `vnet_address_space` | VNet CIDR blocks | list(string) | `["10.0.0.0/16"]` | ❌ |
-| `cosmos_db_throughput` | Cosmos DB RU/s | number | `400` | ❌ |
-| `function_app_runtime` | Runtime (python/node/dotnet) | string | `python` | ❌ |
-| `function_app_runtime_version` | Runtime version | string | `3.11` | ❌ |
-| `enable_monitoring` | Enable App Insights | bool | `true` | ❌ |
-| `log_retention_days` | Log retention period | number | `30` | ❌ |
-| `owner_email` | Resource owner email | string | `team@company.com` | ❌ |
-| `cost_center` | Billing cost center | string | `IT` | ❌ |
-| `tags` | Additional resource tags | map(string) | `{}` | ❌ |
+Configured in `environments/` folder:
+
+**common.tfvars** (shared across all environments):
+```hcl
+project_name              = "emp"
+azure_region              = "eastus2"
+owner_email               = "team@company.com"
+cost_center               = "IT"
+enable_monitoring         = true
+function_app_runtime      = "python"
+function_app_runtime_version = "3.11"
+```
+
+**dev.tfvars** (development-specific):
+```hcl
+environment          = "dev"
+vnet_address_space   = ["10.0.0.0/16"]
+cosmos_db_throughput = 400
+log_retention_days   = 30
+```
+
+**stg.tfvars** (staging):
+```hcl
+environment          = "stg"
+vnet_address_space   = ["10.1.0.0/16"]
+cosmos_db_throughput = 800
+log_retention_days   = 60
+```
+
+**prod.tfvars** (production):
+```hcl
+environment          = "prod"
+vnet_address_space   = ["10.2.0.0/16"]
+cosmos_db_throughput = 2000
+log_retention_days   = 90
+resource_suffix      = "prod001"  # Fixed suffix for prod
+```
+
+### Key Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `environment` | Environment (dev/stg/prod) | Required |
+| `project_name` | Project identifier | `emp` |
+| `azure_region` | Azure region | `eastus2` |
+| `vnet_address_space` | VNet CIDR range | `["10.0.0.0/16"]` |
+| `cosmos_db_throughput` | Cosmos DB RU/s | `400` |
+| `enable_monitoring` | Enable monitoring | `true` |
+| `log_retention_days` | Log retention period | `30` |
 
 ---
 
 ## 📤 Outputs
 
-After deployment, Terraform outputs critical information:
+After deployment:
 
 ```bash
 terraform output
@@ -293,81 +249,65 @@ terraform output
 
 | Output | Description |
 |--------|-------------|
-| `resource_group_name` | Name of the resource group |
+| `resource_group_name` | Resource group name |
 | `function_app_name` | Function App name |
-| `function_app_url` | Function App default hostname |
+| `function_app_url` | Function App URL |
 | `static_web_app_url` | Static Web App URL |
 | `cosmos_db_endpoint` | Cosmos DB endpoint |
-| `key_vault_name` | Key Vault name |
-| `app_insights_instrumentation_key` | Application Insights key |
+| `key_vault_uri` | Key Vault URI |
 | `vnet_id` | Virtual Network ID |
-| `function_app_principal_id` | Function App managed identity |
 
 ---
 
-## 🔐 Security & Compliance
+## 🔐 Security Features
 
-### Implemented Security Controls
+### GitHub OIDC Authentication
 
-✅ **Network Security**
-- Private endpoints for all PaaS services
-- Public network access disabled on Cosmos DB and Key Vault
-- NSG rules restricting inbound/outbound traffic
-- VNet integration for Function App outbound traffic
+**No secrets stored in GitHub!** Instead:
 
-✅ **Identity & Access**
-- System-assigned managed identities (no passwords)
-- RBAC-based access control (least privilege)
-- Azure AD authentication only
-- Secrets stored in Key Vault
+1. GitHub generates short-lived OIDC token (1 hour)
+2. Azure validates token against federated credential
+3. Azure issues access token for deployment
+4. Token expires automatically
 
-✅ **Data Protection**
-- TLS 1.2 minimum for all services
-- HTTPS-only enforced
-- Soft delete + purge protection on Key Vault
-- Encryption at rest (Azure-managed keys)
+**Benefits**:
+- ✅ No long-lived credentials
+- ✅ Automatic rotation
+- ✅ Repo and branch-specific
+- ✅ Instant revocation capability
 
-✅ **Monitoring & Compliance**
-- Centralized logging to Log Analytics
-- Diagnostic settings on all resources
-- Application Insights telemetry
-- Audit logs retained per policy
+### Infrastructure Security
+
+- VNet isolation with private endpoints
+- Network Security Groups (NSGs)
+- Managed identities (no passwords)
+- HTTPS-only endpoints
+- RBAC-based access control
+- Private Cosmos DB (no public access)
+
+---
+
+## 🧪 Testing & Validation
 
 ### Pre-commit Hooks
 
-This project uses pre-commit hooks for code quality:
-
-```yaml
-# Enabled hooks:
-- terraform_fmt         # Format Terraform code
-- terraform_validate    # Validate syntax
-- terraform_tflint      # Linting (best practices)
-- terraform_tfsec       # Security scanning
-- terraform_docs        # Auto-generate documentation
-```
-
-**Setup:**
+Automatically run before commits:
 
 ```bash
-# Install pre-commit
-pip install pre-commit
-
-# Install hooks
+# Install
 pre-commit install
 
 # Run manually
 pre-commit run --all-files
 ```
 
-### Security Scanning Results
+Checks:
+- `tflint`: Terraform linting
+- `tfsec`: Security scanning
+- `terraform validate`: Syntax validation
+- `terraform fmt`: Code formatting
 
-All modules pass `tfsec` and `checkov` security scans. See individual module READMEs for detailed scan results.
-
----
-
-## 🧪 Testing
-
-### Local Testing
+### Manual Validation
 
 ```bash
 # Format code
@@ -379,128 +319,74 @@ terraform validate
 # Security scan
 tfsec .
 
-# Linting
-tflint --recursive
-
 # Plan without applying
-terraform plan -var-file="dev.tfvars"
+terraform plan -var-file="environments/dev.tfvars"
 ```
 
-### CI/CD Testing
-
-GitHub Actions workflows automatically run:
-- Pre-commit hooks (fmt, validate, tflint, tfsec, docs)
-- Terraform plan with approval gate
-- Apply with manual approval (tf-apply environment)
-
 ---
 
-## 🔄 CI/CD Workflows
+## 📚 Documentation
 
-### Infrastructure Deployment ([.github/workflows/deploy.yml](.github/workflows/deploy.yml))
-
-**Trigger**: Manual or push to `main`
-
-**Jobs**:
-1. **Pre-commit**: Runs code quality checks
-2. **Terraform Plan**: Generates plan, uploads artifact
-3. **Terraform Apply**: Requires approval via `tf-apply` environment
-
-**Setup Required**:
-- Create GitHub environment `tf-apply` with required reviewers
-- Add `AZURE_CREDENTIALS` secret (service principal JSON)
-
-### Infrastructure Destruction ([.github/workflows/destroy.yml](.github/workflows/destroy.yml))
-
-**Trigger**: Manual workflow dispatch with confirmation
-
-**Jobs**:
-1. **Validate Input**: Ensures user types "DESTROY" to confirm
-2. **Terraform Destroy Plan**: Shows what will be deleted
-3. **Terraform Destroy**: Requires approval via `tf-destroy` environment
-
-**Safety Features**:
-- Double confirmation required
-- Plan review before destruction
-- Approval gate prevents accidental deletion
-
-### Application Deployment ([.github/workflows/deploy-app-only.yml](.github/workflows/deploy-app-only.yml))
-
-**Trigger**: Manual or push to `app/` directory
-
-**Jobs**:
-1. **Deploy Backend**: Uploads Function App code
-2. **Deploy Frontend**: Builds and deploys Static Web App
-3. **Seed Data**: Populates Cosmos DB with sample data
-4. **Verify**: Tests API endpoints
-
----
-
-## 📖 Module Documentation
-
-Each module has comprehensive documentation:
-
-- [app_insights](modules/app_insights/README.md) - Application monitoring
-- [cosmos_db](modules/cosmos_db/README.md) - NoSQL database with private endpoint
-- [function_app](modules/function_app/README.md) - Serverless API with VNet integration
-- [key_vault](modules/key_vault/README.md) - Secrets management with RBAC
-- [log_analytics](modules/log_analytics/README.md) - Centralized logging
-- [private_dns_zone](modules/private_dns_zone/README.md) - DNS resolution for private endpoints
-- [resource_group](modules/resource_group/README.md) - Resource container
-- [securitygroup](modules/securitygroup/README.md) - Network security rules
-- [static_web_app](modules/static_web_app/README.md) - Frontend hosting
-- [virtualnetwork](modules/virtualnetwork/README.md) - Virtual network
-- [virtualsubnet](modules/virtualsubnet/README.md) - Subnet configurations
+- **OIDC Setup**: See `archive/GITHUB_OIDC_SETUP.md`
+- **Quick Start**: See `archive/GITHUB_OIDC_QUICKSTART.md`
+- **Multi-Branch**: See `archive/GITHUB_OIDC_MULTI_BRANCH.md`
+- **Best Practices**: See `archive/TERRAFORM_BEST_PRACTICES.md`
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Common Issues
+### OIDC Authentication Fails
 
-**Issue**: Function App cannot connect to Cosmos DB  
-**Solution**: Verify Private DNS Zone is linked to VNet. Check [cosmosDb.tf](cosmosDb.tf) for DNS zone configuration.
-
-**Issue**: `terraform init` fails with backend error  
-**Solution**: Ensure storage account exists and credentials are correct in [backend.tf](backend.tf).
-
-**Issue**: Pre-commit hooks fail with "command not found"  
-**Solution**: Install tools locally or let CI handle validation:
 ```bash
-choco install tflint tfsec terraform-docs  # Windows
-brew install tflint tfsec terraform-docs    # macOS
+# Verify federation credential exists
+az ad app federated-credential list --id $AZURE_CLIENT_ID
+
+# Check subject matches: repo:ORG/REPO:ref:refs/heads/main
 ```
 
-**Issue**: GitHub Actions deployment fails at approval step  
-**Solution**: Create `tf-apply` environment in repo Settings → Environments and add required reviewers.
-
-**Issue**: Static Web App shows "Failed to load data"  
-**Solution**: Check Function App logs, verify CORS settings, ensure managed identity has Cosmos DB data access.
-
-### Debugging
+### Terraform State Lock
 
 ```bash
-# Enable Terraform debug logging
-export TF_LOG=DEBUG
-terraform plan -var-file="dev.tfvars"
+# Force unlock (use carefully!)
+terraform force-unlock <LOCK_ID>
+```
 
-# View Function App logs
-az functionapp log tail --name <function-app-name> --resource-group <rg-name>
+### Module Errors
 
-# Check Cosmos DB connectivity
-az cosmosdb show --name <cosmos-name> --resource-group <rg-name>
+```bash
+# Re-initialize modules
+terraform init -upgrade
 
-# Verify RBAC assignments
-az role assignment list --assignee <principal-id> --all
+# Clear cache
+rm -rf .terraform
+terraform init
 ```
 
 ---
 
-## 🔧 Customization
+## 🤝 Contributing
 
-### Adding a New Environment
+1. Create feature branch
+2. Make changes
+3. Run pre-commit hooks
+4. Submit PR
+5. GitHub Actions validates
+6. Merge to main → Auto-deploy
 
-1. Copy `dev.tfvars` to `<env>.tfvars`
+---
+
+## 📄 License
+
+Proprietary - Internal use only
+
+---
+
+## 📞 Support
+
+- **Documentation**: See `archive/` folder
+- **Issues**: GitHub Issues
+- **Team**: team@company.com
 2. Update environment-specific values
 3. Deploy: `terraform apply -var-file="<env>.tfvars"`
 

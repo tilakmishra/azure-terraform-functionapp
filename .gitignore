@@ -1,6 +1,9 @@
 # ============================================
 # Documentation (personal reference - not for GitHub)
 # ============================================
+# Archive folder - personal notes and old docs
+archive/
+
 SECURITY_IMPLEMENTATION.md
 DEPLOYMENT_GUIDE.md
 QUICK_REFERENCE.md
@@ -18,6 +21,26 @@ VISUAL_ARCHITECTURE_SUMMARY.md
 .terraform/
 *.tfstate
 *.tfstate.*
+terraform.tfstate
+terraform.tfstate.backup
+.terraform.lock.hcl
+
+# Old tfvars location (deprecated - use environments/ folder)
+dev.tfvars
+prod.tfvars
+stg.tfvars
+staging.tfvars
+terraform.tfvars
+
+# ============================================
+# IDE & Editor
+# ============================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
 *.tfplan
 .terraform.lock.hcl
 *.tfvars
