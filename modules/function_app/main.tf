@@ -17,7 +17,7 @@ resource "azurerm_storage_account" "function_storage" {
   account_tier                  = "Standard"
   account_replication_type      = "LRS"
   min_tls_version               = "TLS1_2"
-  public_network_access_enabled = true  # Required for Function App deployment
+  public_network_access_enabled = true # Required for Function App deployment
   tags                          = var.tags
 }
 
@@ -81,7 +81,7 @@ resource "azurerm_linux_function_app" "main" {
   storage_account_name          = azurerm_storage_account.function_storage.name
   storage_account_access_key    = azurerm_storage_account.function_storage.primary_access_key
   https_only                    = true
-  public_network_access_enabled = true  # Required for deployment and Static Web App access
+  public_network_access_enabled = true # Required for deployment and Static Web App access
 
   # VNet Integration for outbound traffic
   virtual_network_subnet_id = var.vnet_integration_subnet_id

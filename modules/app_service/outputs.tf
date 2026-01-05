@@ -27,10 +27,10 @@ output "linux_web_apps" {
   description = "Map of Linux Web Apps with their details"
   value = var.os_type == "Linux" ? {
     for key, app in azurerm_linux_web_app.main : key => {
-      id                     = app.id
-      name                   = app.name
-      default_hostname       = app.default_hostname
-      outbound_ip_addresses  = app.outbound_ip_addresses
+      id                             = app.id
+      name                           = app.name
+      default_hostname               = app.default_hostname
+      outbound_ip_addresses          = app.outbound_ip_addresses
       possible_outbound_ip_addresses = app.possible_outbound_ip_addresses
       identity = {
         principal_id = try(app.identity[0].principal_id, null)
@@ -68,10 +68,10 @@ output "windows_web_apps" {
   description = "Map of Windows Web Apps with their details"
   value = var.os_type == "Windows" ? {
     for key, app in azurerm_windows_web_app.main : key => {
-      id                     = app.id
-      name                   = app.name
-      default_hostname       = app.default_hostname
-      outbound_ip_addresses  = app.outbound_ip_addresses
+      id                             = app.id
+      name                           = app.name
+      default_hostname               = app.default_hostname
+      outbound_ip_addresses          = app.outbound_ip_addresses
       possible_outbound_ip_addresses = app.possible_outbound_ip_addresses
       identity = {
         principal_id = try(app.identity[0].principal_id, null)
@@ -109,7 +109,7 @@ output "web_app_ids" {
   description = "Map of all Web App IDs (Linux or Windows based on os_type)"
   value = var.os_type == "Linux" ? {
     for key, app in azurerm_linux_web_app.main : key => app.id
-  } : {
+    } : {
     for key, app in azurerm_windows_web_app.main : key => app.id
   }
 }
@@ -118,7 +118,7 @@ output "web_app_hostnames" {
   description = "Map of all Web App default hostnames (Linux or Windows based on os_type)"
   value = var.os_type == "Linux" ? {
     for key, app in azurerm_linux_web_app.main : key => app.default_hostname
-  } : {
+    } : {
     for key, app in azurerm_windows_web_app.main : key => app.default_hostname
   }
 }
@@ -127,7 +127,7 @@ output "web_app_identities" {
   description = "Map of all Web App managed identity principal IDs (Linux or Windows based on os_type)"
   value = var.os_type == "Linux" ? {
     for key, app in azurerm_linux_web_app.main : key => try(app.identity[0].principal_id, null)
-  } : {
+    } : {
     for key, app in azurerm_windows_web_app.main : key => try(app.identity[0].principal_id, null)
   }
 }
@@ -140,7 +140,7 @@ output "private_endpoint_ids" {
   value = var.enable_private_endpoint ? (
     var.os_type == "Linux" ? {
       for key, pe in azurerm_private_endpoint.linux_apps : key => pe.id
-    } : {
+      } : {
       for key, pe in azurerm_private_endpoint.windows_apps : key => pe.id
     }
   ) : {}
@@ -151,7 +151,7 @@ output "private_endpoint_ip_addresses" {
   value = var.enable_private_endpoint ? (
     var.os_type == "Linux" ? {
       for key, pe in azurerm_private_endpoint.linux_apps : key => pe.private_service_connection[0].private_ip_address
-    } : {
+      } : {
       for key, pe in azurerm_private_endpoint.windows_apps : key => pe.private_service_connection[0].private_ip_address
     }
   ) : {}

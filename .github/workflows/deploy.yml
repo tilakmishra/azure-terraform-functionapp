@@ -1,129 +1,62 @@
-name: Deploy Infrastructure and Application
+name: Deploy Infrastructure Only
 
 on:
-  # Disabled auto-trigger - use manual trigger only
-  # push:
-  #   branches: [main]
-  workflow_dispatch:  # Manual trigger only
-    inputs:
-      deploy_backend:
-        description: 'Deploy Backend Function App'
-        required: false
-        type: boolean
-        default: true
-      deploy_frontend:
-        description: 'Deploy Frontend Static Web App'
-        required: false
-        type: boolean
-        default: false
-      force_deploy:
-        description: 'Force deploy even if no changes detected'
-        required: false
-        type: boolean
-        default: false
+  workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'app/backend'
-  PYTHON_VERSION: '3.11'
-  NODE_VERSION: '18'
   TERRAFORM_VERSION: '1.5.0'
+  PYTHON_VERSION: '3.11'
+  TFLINT_VERSION: '0.51.1'
+  TFSEC_VERSION: '1.28.1'
+  TERRAFORM_DOCS_VERSION: '0.17.0'
 
 jobs:
-  # ============================================
-  # Job 0a: Run Pre-commit Checks (Code Quality)
-  # ============================================
   pre-commit:
-    name: 'Pre-commit Terraform Checks'
+    name: 'Pre-commit Checks'
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: '1.5.0'
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+      - name: Install tflint, tfsec, terraform-docs
+        run: |
+          set -e
+          curl -sL "https://github.com/terraform-linters/tflint/releases/download/v${{ env.TFLINT_VERSION }}/tflint_linux_amd64.zip" -o /tmp/tflint.zip
+          unzip -o /tmp/tflint.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/tflint
+
+          curl -sL "https://github.com/aquasecurity/tfsec/releases/download/v${{ env.TFSEC_VERSION }}/tfsec-linux-amd64" -o /usr/local/bin/tfsec
+          chmod +x /usr/local/bin/tfsec
+
+          curl -sL "https://github.com/terraform-docs/terraform-docs/releases/download/v${{ env.TERRAFORM_DOCS_VERSION }}/terraform-docs-v${{ env.TERRAFORM_DOCS_VERSION }}-linux-amd64.tar.gz" -o /tmp/terraform-docs.tar.gz
+          tar -xzf /tmp/terraform-docs.tar.gz -C /usr/local/bin terraform-docs
+          chmod +x /usr/local/bin/terraform-docs
 
       - name: Install pre-commit
         run: |
           python -m pip install --upgrade pip
           pip install pre-commit
-          echo "✅ pre-commit installed"
 
-      - name: Run pre-commit checks
-        run: |
-          pre-commit run --all-files
-          echo "✅ Pre-commit checks passed"
+      - name: Run pre-commit
+        run: pre-commit run --all-files
 
-  # ============================================
-  # Job 0: Detect Changes (backend/frontend)
-  # ============================================
-  changes:
-    name: 'Detect Changed Paths'
+  terraform-plan:
+    name: 'Terraform Plan'
     runs-on: ubuntu-latest
+    needs: pre-commit
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      should_deploy_backend: ${{ steps.determine.outputs.should_deploy_backend }}
-      should_deploy_frontend: ${{ steps.determine.outputs.should_deploy_frontend }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Paths filter
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            backend:
-              - 'app/backend/**'
-              - 'azure/DTE/terraform/app/backend/**'
-            frontend:
-              - 'app/frontend/**'
-              - 'azure/DTE/terraform/app/frontend/**'
-
-      - name: Determine deployment strategy
-        id: determine
-        run: |
-          # If force_deploy is true or manual deploy inputs are set, deploy accordingly
-          FORCE_DEPLOY="${{ github.event.inputs.force_deploy }}"
-          DEPLOY_BACKEND="${{ github.event.inputs.deploy_backend }}"
-          DEPLOY_FRONTEND="${{ github.event.inputs.deploy_frontend }}"
-          
-          # Default to true if not set (for backward compatibility)
-          FORCE_DEPLOY="${FORCE_DEPLOY:-true}"
-          DEPLOY_BACKEND="${DEPLOY_BACKEND:-true}"
-          DEPLOY_FRONTEND="${DEPLOY_FRONTEND:-true}"
-          
-          if [ "$FORCE_DEPLOY" = "true" ]; then
-            echo "should_deploy_backend=$DEPLOY_BACKEND" >> $GITHUB_OUTPUT
-            echo "should_deploy_frontend=$DEPLOY_FRONTEND" >> $GITHUB_OUTPUT
-            echo "✅ Force deploy enabled - deploying based on manual inputs"
-          else
-            echo "should_deploy_backend=${{ steps.filter.outputs.backend }}" >> $GITHUB_OUTPUT
-            echo "should_deploy_frontend=${{ steps.filter.outputs.frontend }}" >> $GITHUB_OUTPUT
-            echo "✅ Using change detection for deployment"
-          fi
-
-  # ============================================
-  # Job 1: Deploy Infrastructure with Terraform
-  # ============================================
-  infrastructure:
-    name: 'Terraform Infrastructure'
-    runs-on: ubuntu-latest
-    outputs:
-      function_app_name: ${{ steps.terraform-output.outputs.function_app_name }}
-      function_app_url: ${{ steps.terraform-output.outputs.function_app_url }}
-      static_web_app_name: ${{ steps.terraform-output.outputs.static_web_app_name }}
-      static_web_app_url: ${{ steps.terraform-output.outputs.static_web_app_url }}
-      resource_group: ${{ steps.terraform-output.outputs.resource_group }}
-    
+      backend_key: terraform.tfstate
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -141,45 +74,21 @@ jobs:
 
       - name: Set Terraform Service Principal Environment Variables
         run: |
-          # Extract service principal credentials from AZURE_CREDENTIALS secret
           echo "ARM_CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientId')" >> $GITHUB_ENV
           echo "ARM_CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientSecret')" >> $GITHUB_ENV
           echo "ARM_TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.tenantId')" >> $GITHUB_ENV
           echo "ARM_SUBSCRIPTION_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.subscriptionId')" >> $GITHUB_ENV
-          echo "✅ Service principal environment variables set for Terraform"
 
       - name: Create Terraform Backend Infrastructure
         run: |
-          echo "🔧 Setting up Terraform backend..."
-          
-          # Backend configuration
           RG_NAME="rg-terraform-state"
           STORAGE_NAME="tfstateemp"
           CONTAINER_NAME="tfstate"
           LOCATION="eastus"
-          
-          # Create resource group if it doesn't exist
-          echo "Creating resource group: $RG_NAME"
-          az group create --name "$RG_NAME" --location "$LOCATION" 2>/dev/null || echo "ℹ️  Resource group already exists"
-          
-          # Create storage account if it doesn't exist
-          echo "Creating storage account: $STORAGE_NAME"
-          az storage account create \
-            --resource-group "$RG_NAME" \
-            --name "$STORAGE_NAME" \
-            --sku Standard_LRS \
-            --kind StorageV2 \
-            --https-only true \
-            2>/dev/null || echo "ℹ️  Storage account already exists"
-          
-          # Create container if it doesn't exist
-          echo "Creating storage container: $CONTAINER_NAME"
-          az storage container create \
-            --account-name "$STORAGE_NAME" \
-            --name "$CONTAINER_NAME" \
-            2>/dev/null || echo "ℹ️  Container already exists"
-          
-          echo "✅ Terraform backend infrastructure ready"
+
+          az group create --name "$RG_NAME" --location "$LOCATION" 2>/dev/null || true
+          az storage account create --resource-group "$RG_NAME" --name "$STORAGE_NAME" --sku Standard_LRS --kind StorageV2 --https-only true 2>/dev/null || true
+          az storage container create --account-name "$STORAGE_NAME" --name "$CONTAINER_NAME" 2>/dev/null || true
 
       - name: Terraform Init
         working-directory: .
@@ -189,412 +98,67 @@ jobs:
             -backend-config="storage_account_name=tfstateemp" \
             -backend-config="container_name=tfstate" \
             -backend-config="key=terraform.tfstate"
-          echo "✅ Terraform initialized with remote backend"
 
       - name: Terraform Validate
         working-directory: .
-        run: |
-          terraform validate
-          echo "✅ Terraform configuration validated"
+        run: terraform validate
 
       - name: Terraform Format Check
         working-directory: .
-        run: |
-          terraform fmt -recursive -check || true
-          echo "✅ Terraform format checked"
-
-      - name: Check if resources exist
-        id: check-resources
-        working-directory: .
-        run: |
-          # Try to get the function app - if it exists, skip terraform apply
-          RESOURCE_GROUP=$(cat dev.tfvars | grep 'resource_group_name' | cut -d'=' -f2 | tr -d ' "')
-          FUNCTION_APP=$(cat dev.tfvars | grep 'function_app_name' | cut -d'=' -f2 | tr -d ' "')
-          
-          echo "Resource Group: $RESOURCE_GROUP"
-          echo "Function App: $FUNCTION_APP"
-          
-          if az functionapp show --resource-group "$RESOURCE_GROUP" --name "$FUNCTION_APP" &>/dev/null; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "✅ Resources already exist - will import into state"
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ Resources not found - will deploy infrastructure"
-          fi
-
-      - name: Import existing resources into Terraform state
-        if: steps.check-resources.outputs.exists == 'true'
-        working-directory: .
-        run: |
-          echo "📦 Scanning and importing existing Azure resources..."
-          
-          RESOURCE_GROUP=$(cat dev.tfvars | grep 'resource_group_name' | cut -d'=' -f2 | tr -d ' "')
-          
-          # Use terraform import -generate-config-out to auto-generate HCL blocks
-          echo "🔍 Auto-generating configuration blocks for existing resources..."
-          
-          # Import Resource Group
-          if ! terraform state show module.resource_group.azurerm_resource_group.this &>/dev/null; then
-            echo "📋 Importing Resource Group: $RESOURCE_GROUP"
-            terraform import \
-              -generate-config-out=generated_rg.tf \
-              module.resource_group.azurerm_resource_group.this \
-              "/subscriptions/$(az account show -q --query id -o tsv)/resourceGroups/$RESOURCE_GROUP" 2>/dev/null || \
-            echo "ℹ️ Resource Group import/generation attempted"
-          fi
-          
-          # Import all resources in the resource group with query
-          echo "🔍 Scanning all resources in $RESOURCE_GROUP..."
-          
-          # Get all resources
-          RESOURCES=$(az resource list --resource-group "$RESOURCE_GROUP" --query "[].{id:id, type:type, name:name}" -o json)
-          
-          # Auto-import with config generation
-          import_with_generation() {
-            local resource_id=$1
-            local resource_type=$2
-            local resource_name=$3
-            local tf_resource_address=$4
-            
-            if [ -z "$tf_resource_address" ]; then
-              return
-            fi
-            
-            # Check if already in state
-            if ! terraform state show "$tf_resource_address" &>/dev/null; then
-              echo "📥 Importing and generating config for: $resource_name ($resource_type)"
-              terraform import \
-                -generate-config-out="generated_${resource_name}.tf" \
-                "$tf_resource_address" \
-                "$resource_id" 2>/dev/null || \
-              echo "ℹ️ Import for $resource_name attempted"
-            fi
-          }
-          
-          # Parse and import each resource
-          echo "$RESOURCES" | jq -r '.[] | "\(.id)|\(.type)|\(.name)"' | while IFS='|' read -r resource_id resource_type resource_name; do
-            case "$resource_type" in
-              "Microsoft.Network/virtualNetworks")
-                import_with_generation "$resource_id" "$resource_type" "$resource_name" "module.virtualnetwork.azurerm_virtual_network.this"
-                ;;
-              "Microsoft.Web/sites")
-                import_with_generation "$resource_id" "$resource_type" "$resource_name" "module.function_app.azurerm_linux_function_app.main"
-                ;;
-              "Microsoft.DocumentDB/databaseAccounts")
-                import_with_generation "$resource_id" "$resource_type" "$resource_name" "module.cosmos_db.azurerm_cosmosdb_account.this"
-                ;;
-              "Microsoft.KeyVault/vaults")
-                import_with_generation "$resource_id" "$resource_type" "$resource_name" "module.key_vault.azurerm_key_vault.this"
-                ;;
-              "Microsoft.Storage/storageAccounts")
-                if [[ ! "$resource_name" =~ "tfstate" ]]; then
-                  import_with_generation "$resource_id" "$resource_type" "$resource_name" "module.storage.azurerm_storage_account.main"
-                fi
-                ;;
-              "Microsoft.Web/staticSites")
-                import_with_generation "$resource_id" "$resource_type" "$resource_name" "module.static_web_app.azurerm_static_web_app.main"
-                ;;
-              "Microsoft.Insights/components")
-                import_with_generation "$resource_id" "$resource_type" "$resource_name" "module.app_insights[0].azurerm_application_insights.main"
-                ;;
-            esac
-          done
-          
-          # Display generated configurations
-          if ls generated_*.tf 1> /dev/null 2>&1; then
-            echo ""
-            echo "✅ Generated configuration files:"
-            ls -la generated_*.tf | awk '{print "   " $9}'
-            echo ""
-            echo "📝 Review generated configs and merge into your Terraform modules if needed"
-          fi
-          
-          echo "✅ Resource import and config generation complete"
+        run: terraform fmt -recursive -check || true
 
       - name: Terraform Plan
-        if: steps.check-resources.outputs.exists == 'false'
+        working-directory: .
+        run: terraform plan -var-file="dev.tfvars" -out=tfplan
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: tfplan
+
+  terraform-apply:
+    name: 'Terraform Apply (approval required)'
+    needs: terraform-plan
+    runs-on: ubuntu-latest
+    environment: tf-apply
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set Terraform Service Principal Environment Variables
+        run: |
+          echo "ARM_CLIENT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientId')" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.clientSecret')" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.tenantId')" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | jq -r '.subscriptionId')" >> $GITHUB_ENV
+
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: .
+
+      - name: Terraform Init
         working-directory: .
         run: |
-          terraform plan -var-file="dev.tfvars" -out=tfplan
-          echo "✅ Terraform plan created"
+          terraform init \
+            -backend-config="resource_group_name=rg-terraform-state" \
+            -backend-config="storage_account_name=tfstateemp" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=terraform.tfstate"
 
       - name: Terraform Apply
-        if: steps.check-resources.outputs.exists == 'false'
         working-directory: .
-        run: |
-          terraform apply -auto-approve tfplan
-          echo "✅ Infrastructure deployed"
-        
-      - name: Initialize Terraform for existing resources
-        if: steps.check-resources.outputs.exists == 'true'
-        working-directory: .
-        run: |
-          terraform init
-          terraform refresh -var-file="dev.tfvars" || true
-          echo "✅ Terraform initialized for existing resources"
-
-      - name: Get Terraform Outputs
-        id: terraform-output
-        working-directory: .
-        run: |
-          # Refresh state if resources already exist
-          terraform refresh -var-file="dev.tfvars" || true
-          
-          echo "function_app_name=$(terraform output -raw function_app_name)" >> $GITHUB_OUTPUT
-          echo "function_app_url=$(terraform output -raw function_app_url)" >> $GITHUB_OUTPUT
-          echo "static_web_app_name=$(terraform output -raw static_web_app_name)" >> $GITHUB_OUTPUT
-          echo "resource_group=$(terraform output -raw resource_group_name)" >> $GITHUB_OUTPUT
-          
-          echo "📋 Terraform Outputs:"
-          echo "   Function App: $(terraform output -raw function_app_name)"
-          echo "   Function URL: $(terraform output -raw function_app_url)"
-          echo "   Static Web App: $(terraform output -raw static_web_app_name)"
-          echo "   Resource Group: $(terraform output -raw resource_group_name)"
-          echo "✅ Terraform outputs extracted"
-
-  # ============================================
-  # Job 2: Deploy Function App (Backend)
-  # ============================================
-  deploy-backend:
-    name: 'Deploy Function App (Python Backend)'
-    needs: [changes, infrastructure]
-    if: needs.changes.outputs.should_deploy_backend == 'true'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install Python dependencies
-        working-directory: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt --target=".python_packages/lib/site-packages"
-          echo "✅ Python dependencies installed"
-
-      - name: Azure CLI Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Configure Function App Settings
-        run: |
-          echo "🔧 Configuring Function App settings for Cosmos DB..."
-          
-          # Get Cosmos DB connection details from Terraform outputs or Azure
-          RESOURCE_GROUP="${{ needs.infrastructure.outputs.resource_group }}"
-          FUNCTION_APP="${{ needs.infrastructure.outputs.function_app_name }}"
-          
-          # Get Cosmos DB account name (adjust based on your naming convention)
-          COSMOS_ACCOUNT=$(az cosmosdb list --resource-group "$RESOURCE_GROUP" --query "[0].name" -o tsv)
-          
-          if [ -n "$COSMOS_ACCOUNT" ]; then
-            echo "Found Cosmos DB account: $COSMOS_ACCOUNT"
-            
-            # Get Cosmos DB connection string
-            COSMOS_CONNECTION_STRING=$(az cosmosdb keys list \
-              --name "$COSMOS_ACCOUNT" \
-              --resource-group "$RESOURCE_GROUP" \
-              --type connection-strings \
-              --query "connectionStrings[0].connectionString" -o tsv)
-            
-            # Set app settings
-            az functionapp config appsettings set \
-              --name "$FUNCTION_APP" \
-              --resource-group "$RESOURCE_GROUP" \
-              --settings \
-                "COSMOS_DB_CONNECTION_STRING=$COSMOS_CONNECTION_STRING" \
-                "COSMOS_DB_DATABASE_NAME=EmployeeDB" \
-                "COSMOS_DB_CONTAINER_NAME=Employees" \
-                "PYTHON_ISOLATE_WORKER_DEPENDENCIES=1"
-            
-            echo "✅ Function App settings configured"
-          else
-            echo "⚠️ No Cosmos DB account found in resource group"
-          fi
-
-      - name: Deploy Function App Code
-        uses: Azure/functions-action@v1
-        with:
-          app-name: ${{ needs.infrastructure.outputs.function_app_name }}
-          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          scm-do-build-during-deployment: true
-          enable-oryx-build: true
-
-      - name: Verify Function App Deployment
-        run: |
-          echo "⏳ Waiting for Function App to be ready..."
-          sleep 30
-          
-          # Test health endpoint
-          FUNCTION_URL="${{ needs.infrastructure.outputs.function_app_url }}"
-          echo "Testing health endpoint: $FUNCTION_URL/api/health"
-          
-          MAX_RETRIES=5
-          RETRY_COUNT=0
-          
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "$FUNCTION_URL/api/health" || echo "000")
-            
-            if [ "$HEALTH_CHECK" = "200" ]; then
-              echo "✅ Function App is healthy (HTTP $HEALTH_CHECK)"
-              
-              # Test employees endpoint
-              echo "Testing employees endpoint..."
-              EMPLOYEES_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "$FUNCTION_URL/api/employees" || echo "000")
-              echo "Employees endpoint status: HTTP $EMPLOYEES_CHECK"
-              break
-            else
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              echo "⏳ Attempt $RETRY_COUNT/$MAX_RETRIES: Function App returned HTTP $HEALTH_CHECK, retrying..."
-              sleep 15
-            fi
-          done
-          
-          if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-            echo "⚠️ Function App health check did not return 200 after $MAX_RETRIES attempts"
-            echo "Check Azure Portal for Function App logs"
-          fi
-
-  # ============================================
-  # Job 3: Deploy Static Web App (Frontend)
-  # ============================================
-  deploy-frontend:
-    name: 'Deploy Static Web App (React Frontend)'
-    needs: [changes, infrastructure, deploy-backend]
-    if: needs.changes.outputs.should_deploy_frontend == 'true'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Node dependencies
-        working-directory: app/frontend
-        run: |
-          npm ci
-          echo "✅ Node dependencies installed"
-
-      - name: Build React Frontend
-        working-directory: app/frontend
-        env:
-          REACT_APP_API_URL: ${{ needs.infrastructure.outputs.function_app_url }}/api
-          CI: false
-        run: |
-          echo "🔧 Building React app with API URL: $REACT_APP_API_URL"
-          npm run build
-          echo "✅ Frontend built successfully"
-
-      - name: Deploy to Static Web App
-        uses: Azure/static-web-apps-deploy@v1
-        with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: "upload"
-          app_location: "app/frontend/build"
-          skip_app_build: true
-
-  # ============================================
-  # Job 4: Verify Deployment & Output Results
-  # ============================================
-  verify-deployment:
-    name: 'Verify Deployment & Output Results'
-    needs: [changes, infrastructure, deploy-backend, deploy-frontend]
-    if: |
-      always() && 
-      needs.infrastructure.result == 'success' &&
-      (needs.changes.outputs.should_deploy_backend == 'true' || needs.changes.outputs.should_deploy_frontend == 'true')
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Azure CLI Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Test API Endpoints
-        run: |
-          echo "🧪 Testing API endpoints..."
-          
-          FUNCTION_URL="${{ needs.infrastructure.outputs.function_app_url }}"
-          
-          # Health check
-          echo "Testing: $FUNCTION_URL/api/health"
-          HEALTH=$(curl -s -w "\n%{http_code}" "$FUNCTION_URL/api/health" || echo -e "\nFailed to connect")
-          HTTP_CODE=$(echo "$HEALTH" | tail -n1)
-          BODY=$(echo "$HEALTH" | head -n -1)
-          
-          echo "Health Check Response: $BODY"
-          echo "HTTP Status Code: $HTTP_CODE"
-          
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "✅ Health endpoint working"
-          else
-            echo "⚠️ Health endpoint returned: $HTTP_CODE"
-          fi
-          
-          # Test employees endpoint
-          echo ""
-          echo "Testing: $FUNCTION_URL/api/employees"
-          EMPLOYEES=$(curl -s -w "\n%{http_code}" "$FUNCTION_URL/api/employees" || echo -e "\nFailed to connect")
-          EMP_HTTP_CODE=$(echo "$EMPLOYEES" | tail -n1)
-          
-          echo "Employees endpoint HTTP Status: $EMP_HTTP_CODE"
-          
-          if [ "$EMP_HTTP_CODE" = "200" ]; then
-            echo "✅ Employees endpoint working"
-          else
-            echo "⚠️ Employees endpoint returned: $EMP_HTTP_CODE"
-          fi
-
-      - name: Get Static Web App URL
-        id: get-swa-url
-        run: |
-          RESOURCE_GROUP="${{ needs.infrastructure.outputs.resource_group }}"
-          SWA_NAME="${{ needs.infrastructure.outputs.static_web_app_name }}"
-          
-          echo "Getting Static Web App URL..."
-          SWA_URL=$(az staticwebapp show \
-            --name "$SWA_NAME" \
-            --resource-group "$RESOURCE_GROUP" \
-            --query "defaultHostname" -o tsv)
-          
-          if [ -n "$SWA_URL" ]; then
-            echo "static_web_app_url=https://$SWA_URL" >> $GITHUB_OUTPUT
-            echo "✅ Static Web App URL: https://$SWA_URL"
-          else
-            echo "⚠️ Could not retrieve Static Web App URL"
-          fi
-
-      - name: Output Deployment URLs
-        run: |
-          echo ""
-          echo "╔═════════════════════════════════════════════════════════════╗"
-          echo "║           🎉 DEPLOYMENT COMPLETED SUCCESSFULLY 🎉           ║"
-          echo "╚═════════════════════════════════════════════════════════════╝"
-          echo ""
-          echo "📋 Deployment Summary:"
-          echo "────────────────────────────────────────────────────────────"
-          echo ""
-          echo "🌐 FRONTEND (React Application):"
-          echo "   Static Web App Name: ${{ needs.infrastructure.outputs.static_web_app_name }}"
-          echo "   Static Web App URL:  ${{ steps.get-swa-url.outputs.static_web_app_url }}"
-          echo ""
-          echo "⚙️  BACKEND (Python Function App):"
-          echo "   Function App Name: ${{ needs.infrastructure.outputs.function_app_name }}"
-          echo "   Function App URL:  ${{ needs.infrastructure.outputs.function_app_url }}"
-          echo "   Health Endpoint:   ${{ needs.infrastructure.outputs.function_app_url }}/api/health"
-          echo ""
-          echo "📊 API ENDPOINTS:"
-          echo "   Get Employees:     GET ${{ needs.infrastructure.outputs.function_app_url }}/api/employees"
-          echo "   Create Employee
+        run: terraform apply -auto-approve tfplan

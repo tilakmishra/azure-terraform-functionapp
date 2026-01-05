@@ -77,6 +77,15 @@ resource "azurerm_private_endpoint" "cosmos_db" {
     is_manual_connection           = false
   }
 
+  # Attach private DNS zone so the private endpoint hostname resolves to the private IP
+  dynamic "private_dns_zone_group" {
+    for_each = var.private_dns_zone_id == null ? [] : [var.private_dns_zone_id]
+    content {
+      name                 = "cosmos-db-dns"
+      private_dns_zone_ids = [private_dns_zone_group.value]
+    }
+  }
+
   tags = var.tags
 }
 

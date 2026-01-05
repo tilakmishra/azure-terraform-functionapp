@@ -68,3 +68,9 @@ variable "log_analytics_workspace_id" {
   type        = string
   default     = null
 }
+
+variable "private_dns_zone_id" {
+  description = "Private DNS Zone ID for Cosmos DB private endpoint (privatelink.documents.azure.com)"
+  type        = string
+  default     = null
+}

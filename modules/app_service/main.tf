@@ -271,18 +271,18 @@ resource "azurerm_windows_web_app" "main" {
     dynamic "application_stack" {
       for_each = lookup(each.value, "application_stack", null) != null ? [each.value.application_stack] : []
       content {
-        current_stack             = lookup(application_stack.value, "current_stack", null)
-        docker_image_name         = lookup(application_stack.value, "docker_image_name", null)
-        docker_registry_url       = lookup(application_stack.value, "docker_registry_url", null)
-        docker_registry_username  = lookup(application_stack.value, "docker_registry_username", null)
-        docker_registry_password  = lookup(application_stack.value, "docker_registry_password", null)
-        dotnet_version            = lookup(application_stack.value, "dotnet_version", null)
-        dotnet_core_version       = lookup(application_stack.value, "dotnet_core_version", null)
-        java_version              = lookup(application_stack.value, "java_version", null)
+        current_stack                = lookup(application_stack.value, "current_stack", null)
+        docker_image_name            = lookup(application_stack.value, "docker_image_name", null)
+        docker_registry_url          = lookup(application_stack.value, "docker_registry_url", null)
+        docker_registry_username     = lookup(application_stack.value, "docker_registry_username", null)
+        docker_registry_password     = lookup(application_stack.value, "docker_registry_password", null)
+        dotnet_version               = lookup(application_stack.value, "dotnet_version", null)
+        dotnet_core_version          = lookup(application_stack.value, "dotnet_core_version", null)
+        java_version                 = lookup(application_stack.value, "java_version", null)
         java_embedded_server_enabled = lookup(application_stack.value, "java_embedded_server_enabled", null)
-        node_version              = lookup(application_stack.value, "node_version", null)
-        php_version               = lookup(application_stack.value, "php_version", null)
-        python                    = lookup(application_stack.value, "python", null)
+        node_version                 = lookup(application_stack.value, "node_version", null)
+        php_version                  = lookup(application_stack.value, "php_version", null)
+        python                       = lookup(application_stack.value, "python", null)
       }
     }
 

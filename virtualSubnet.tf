@@ -6,7 +6,7 @@ module "virtualsubnet" {
   environment         = var.environment
   resource_group_name = module.resource_group.name
   vnet_name           = module.virtualnetwork.name
-  
+
   subnet_configs = {
     # Function App VNet Integration subnet (requires delegation)
     function_app = {
