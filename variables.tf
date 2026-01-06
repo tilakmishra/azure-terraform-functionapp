@@ -62,12 +62,6 @@ variable "subnet_function_app_cidr" {
   nullable    = false
 }
 
-variable "subnet_app_service_cidr" {
-  description = "CIDR block for App Service subnet (e.g., 10.0.2.0/24 for dev, 10.1.2.0/24 for stg, 10.2.2.0/24 for prod)"
-  type        = string
-  nullable    = false
-}
-
 variable "subnet_private_endpoints_cidr" {
   description = "CIDR block for Private Endpoints subnet (e.g., 10.0.3.0/24 for dev, 10.1.3.0/24 for stg, 10.2.3.0/24 for prod)"
   type        = string

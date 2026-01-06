@@ -39,6 +39,8 @@ module "resource_group" {
 module "log_analytics" {
   source = "./modules/log_analytics"
 
+  count = var.enable_monitoring ? 1 : 0
+
   name                = "log_${local.name_prefix}"
   location            = var.azure_region
   resource_group_name = module.resource_group.name
@@ -56,7 +58,7 @@ module "app_insights" {
   name                       = "appi_${local.name_prefix}"
   location                   = var.azure_region
   resource_group_name        = module.resource_group.name
-  log_analytics_workspace_id = module.log_analytics.workspace_id
+  log_analytics_workspace_id = module.log_analytics[0].workspace_id
   retention_in_days          = var.log_retention_days
   tags                       = local.common_tags
 
@@ -94,15 +96,6 @@ module "virtualsubnet" {
       service_endpoints = ["Microsoft.Web", "Microsoft.Storage", "Microsoft.KeyVault", "Microsoft.AzureCosmosDB"]
       delegation = {
         name         = "function-app-delegation"
-        service_name = "Microsoft.Web/serverFarms"
-        actions      = ["Microsoft.Network/virtualNetworks/subnets/action"]
-      }
-    }
-    app_service = {
-      address_prefixes  = [var.subnet_app_service_cidr]
-      service_endpoints = ["Microsoft.Web", "Microsoft.KeyVault"]
-      delegation = {
-        name         = "app-service-delegation"
         service_name = "Microsoft.Web/serverFarms"
         actions      = ["Microsoft.Network/virtualNetworks/subnets/action"]
       }
@@ -184,7 +177,7 @@ module "cosmos_db" {
   private_endpoint_subnet_id = module.virtualsubnet.subnet_ids["private_endpoints"]
   private_dns_zone_id        = module.cosmos_private_dns_zone.id
   enable_diagnostics         = var.enable_monitoring
-  log_analytics_workspace_id = module.log_analytics.workspace_id
+  log_analytics_workspace_id = var.enable_monitoring ? module.log_analytics[0].workspace_id : null
   tags                       = local.common_tags
 
   depends_on = [module.cosmos_private_dns_zone, module.securitygroup]
